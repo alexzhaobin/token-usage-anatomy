@@ -1,0 +1,32 @@
+{
+  "name": "token-usage-anatomy",
+  "displayName": "Token Usage Anatomy",
+  "version": "0.1.0",
+  "description": "Token Usage Anatomy for Claude Code: see how every prompt turns into input, output, cache reads and cache writes",
+  "author": { "name": "Alex Zhao" },
+  "license": "MIT",
+  "homepage": "https://github.com/alexzhao/token-usage-anatomy",
+  "repository": "https://github.com/alexzhao/token-usage-anatomy",
+  "keywords": ["tokens", "usage", "prompt-cache", "cost", "context"],
+  "icon": "./assets/icon.png",
+  "userConfig": {
+    "recordRequests": {
+      "type": "boolean",
+      "title": "Record every model request",
+      "description": "Also write one row per model request, subagents included",
+      "default": false
+    },
+    "includePromptText": {
+      "type": "boolean",
+      "title": "Store prompt text",
+      "description": "Keep the first 2000 characters of each prompt in its row (stays on this machine)",
+      "default": false
+    },
+    "logDir": {
+      "type": "string",
+      "title": "Log folder",
+      "description": "Where rows and viewer.html go. Empty means ~/.claude/token-usage-anatomy",
+      "default": ""
+    }
+  }
+}
