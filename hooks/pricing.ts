@@ -5,6 +5,7 @@
 
 import { PRICES } from './prices'
 import type { PriceEntry, PriceTable, Rates } from './prices'
+import type { CostParts } from '../types'
 
 /** The four token counts every usage report carries. */
 export type Tokens = {
@@ -26,14 +27,7 @@ export type RequestTokens = Tokens & {
   isUsOnly?: boolean
 }
 
-/** What a request cost, by part, in US dollars. */
-export type CostParts = {
-  input: number
-  cacheRead: number
-  cacheWrite: number
-  reasoning: number
-  answer: number
-}
+export type { CostParts }
 
 /** How a request's thinking tokens were obtained. */
 export type ReasoningMethod = 'reported' | 'proportional' | 'residual'

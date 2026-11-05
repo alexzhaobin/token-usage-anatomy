@@ -9,6 +9,7 @@
   "repository": "https://github.com/alexzhao/token-usage-anatomy",
   "keywords": ["tokens", "usage", "prompt-cache", "cost", "context"],
   "icon": "./assets/icon.png",
+  "types": "./types/index.d.ts",
   "userConfig": {
     "recordRequests": {
       "type": "boolean",
