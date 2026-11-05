@@ -10,12 +10,24 @@
 import { atom, read, update } from 'claude-code'
 import type { PluginOptions, Register } from 'claude-code'
 
+import { drawBand, viewerHref } from './band'
+import type { BandActions, BandView } from './band'
 import { hostFrom } from './io'
 import type { Ports } from './ports'
+import { PRICES } from './prices'
 import { Recorder } from './recorder'
 import type { Config } from './recorder'
 import { initialCache } from './state'
 import type { CharCounts } from './steps'
+import {
+  customSlug,
+  isBuiltInLight,
+  isCustomLight,
+  lightFromColorFgBg,
+  lightFromGnome,
+  lightFromMacStyle,
+  lightFromWindows,
+} from './theme'
 
 // The session values (types in ../types/index.d.ts). They live in this file
 // because Claude Code reads each atom off the file that reads or writes it.
@@ -27,6 +39,14 @@ const cacheAtom = atom({ plugin: 'token-usage-anatomy', key: 'cache' } as const,
 const preloadedAtom = atom({ plugin: 'token-usage-anatomy', key: 'preloaded' } as const, null, {
   shape: 'preloaded-1',
 })
+const isHiddenAtom = atom({ plugin: 'token-usage-anatomy', key: 'isHidden' } as const, false)
+const isLightAtom = atom({ plugin: 'token-usage-anatomy', key: 'isLight' } as const, false)
+const unitAtom = atom({ plugin: 'token-usage-anatomy', key: 'unit' } as const, 'tokens')
+
+/** The pane that holds the chart where a surface draws no band (VS Code, mobile). */
+const PANE_ID = 'token-anatomy'
+
+const USAGE = 'Usage: /token-anatomy [show|hide|open]'
 
 function configOf(options: PluginOptions): Config {
   return {
@@ -53,6 +73,10 @@ const failed = (what: string, error: unknown): string => `token-usage-anatomy: $
 
 export const register: Register = (on, options) => {
   const recorder = new Recorder(configOf(options))
+  /** Reads the theme again; set once the session has started. */
+  let refreshTheme: (() => Promise<void>) | undefined
+  /** `auto` and custom themes can change under us: read again after each prompt. */
+  let isThemeLive = false
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -118,11 +142,84 @@ export const register: Register = (on, options) => {
       })
 
       void recorder.start(ports, host, e.isInteractive).catch(error => $.ui.log(failed('start', error), { to: 'debug' }))
+
+      await $.command.register({
+        name: 'token-anatomy',
+        description: 'Show or hide the token chart, or print the link to the viewer page',
+        argumentHint: '[show|hide|open]',
+        immediate: true,
+      })
+
+      // Light or dark, for the band's palette: the theme setting, and for
+      // `auto` what the terminal or the system says. Anything unclear is dark.
+      refreshTheme = async () => {
+        const theme = String((await $.config.list()).find(row => row.key === 'theme')?.value ?? 'dark')
+        isThemeLive = theme === 'auto' || theme.startsWith('custom:')
+        const light = await (async (): Promise<boolean> => {
+          if (theme !== 'auto') {
+            const slug = customSlug(theme)
+
+            if (slug === undefined) {
+              return isBuiltInLight(theme)
+            }
+
+            return isCustomLight(await $.fs.read(`${host.claudeDir}/themes/${slug}.json`).catch(() => ''))
+          }
+
+          const fromTerminal = lightFromColorFgBg(await $.env.get('COLORFGBG'))
+
+          if (fromTerminal !== undefined) {
+            return fromTerminal
+          }
+
+          if (host.isWindows) {
+            const key = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize'
+            const run = await $.process.run(['reg', 'query', key, '/v', 'AppsUseLightTheme'], { timeoutMs: 5_000 }).catch(() => undefined)
+
+            return (run === undefined ? undefined : lightFromWindows(run.stdout)) ?? false
+          }
+
+          const mac = await $.process.run(['defaults', 'read', '-g', 'AppleInterfaceStyle'], { timeoutMs: 5_000 }).catch(() => undefined)
+          const fromMac = mac === undefined ? undefined : lightFromMacStyle(mac)
+
+          if (fromMac !== undefined) {
+            return fromMac
+          }
+
+          const gnome = await $.process
+            .run(['gsettings', 'get', 'org.gnome.desktop.interface', 'color-scheme'], { timeoutMs: 5_000 })
+            .catch(() => undefined)
+
+          return (gnome === undefined || gnome.exitCode !== 0 ? undefined : lightFromGnome(gnome.stdout)) ?? false
+        })()
+        await update($, isLightAtom, () => light)
+      }
+      void refreshTheme().catch(error => $.ui.log(failed('read the theme', error), { to: 'debug' }))
+
+      // The cache countdown: once a second while the cache is warm (and one
+      // more second to show it going cold), move the band's clock on.
+      $.clock.every(1_000, () => {
+        void (async () => {
+          const cache = await read($, cacheAtom)
+          const now = await $.clock.now()
+
+          if (cache.expiresAt !== null && now <= cache.expiresAt + 1_000) {
+            await update($, cacheAtom, value => ({ ...value, now }))
+          }
+        })().catch(() => undefined)
+      })
     } catch (error) {
       $.ui.log(failed('start', error), { to: 'debug' })
     }
 
     return started
+  }).catch(($, e, next) => next(e))
+
+  on('config.set', { key: 'theme' }, async ($, e, next) => {
+    const result = await next(e)
+    void refreshTheme?.().catch(error => $.ui.log(failed('read the theme', error), { to: 'debug' }))
+
+    return result
   }).catch(($, e, next) => next(e))
 
   // Claude Code names the transcript file only in its settings-hook events.
@@ -248,11 +345,139 @@ export const register: Register = (on, options) => {
         recorder.agentEnded(e.agentId)
       } else {
         await recorder.turnComplete(e)
+
+        if (isThemeLive) {
+          void refreshTheme?.().catch(error => $.ui.log(failed('read the theme', error), { to: 'debug' }))
+        }
       }
     } catch (error) {
       $.ui.log(failed('end a turn', error), { to: 'debug' })
     }
 
     return result
+  }).catch(($, e, next) => next(e))
+
+  // /token-anatomy [show|hide|open]. Where no surface draws the band (VS
+  // Code, mobile), show and hide open and close a pane instead.
+  on('command.run', { command: 'token-anatomy' }, async ($, e) => {
+    const arg = e.args.trim().toLowerCase()
+
+    if (arg === 'open') {
+      const logDir = recorder.logDir
+
+      if (logDir === undefined) {
+        return { text: 'The log folder is not ready yet; try again in a moment.' }
+      }
+
+      return {
+        text:
+          `Viewer: ${viewerHref(logDir, await $.session.id())}\n` +
+          `Open it in a browser. It reads the logs in ${logDir} and needs no network.`,
+      }
+    }
+
+    if (arg !== '' && arg !== 'show' && arg !== 'hide') {
+      return { text: USAGE }
+    }
+
+    const surfaces = await $.session.surfaces()
+    const hasBand = surfaces.length === 0 || surfaces.some(surface => surface === 'terminal' || surface === 'desktop')
+
+    if (!hasBand) {
+      const isOpen = (await $.ui.panes()).some(pane => pane.id === PANE_ID)
+
+      if (arg === 'hide' || (arg === '' && isOpen)) {
+        await $.ui.close({ id: PANE_ID })
+
+        return { text: 'Token chart closed. /token-anatomy show opens it again.' }
+      }
+
+      const opened = await $.ui.open({ id: PANE_ID, title: 'Token anatomy' })
+
+      return {
+        text: opened.isPlaced ? 'Token chart opened in a pane.' : `The token chart could not open a pane here (${opened.reason}).`,
+      }
+    }
+
+    const hide = arg === 'hide' || (arg === '' && !(await read($, isHiddenAtom)))
+    await update($, isHiddenAtom, () => hide)
+
+    if (hide) {
+      return { text: 'Token chart hidden. /token-anatomy show brings it back.' }
+    }
+
+    return {
+      text:
+        (await read($, rowsAtom)).length > 0
+          ? 'Token chart shown above the prompt.'
+          : 'Token chart on: it appears above the prompt after your first prompt.',
+    }
+  }).catch(() => ({ text: 'token-anatomy: that did not work; the debug log says why.' }))
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) {
+      return next(e)
+    }
+
+    const cache = await read($, cacheAtom)
+    const now = Math.max(cache.now, await $.clock.now())
+    const logDir = recorder.logDir
+    const view: BandView = {
+      rows: await read($, rowsAtom),
+      promptCount: await read($, promptNoAtom),
+      unit: await read($, unitAtom),
+      isLight: await read($, isLightAtom),
+      cache: cache.expiresAt === null ? undefined : { remainingMs: cache.expiresAt - now, ttlMs: cache.ttlMs },
+      preloaded: await read($, preloadedAtom),
+      sessionUsd: await read($, sessionUsdAtom),
+      columns: e.props.bodyColumns,
+      maxRows: e.props.maxRows,
+      pricesAsOf: PRICES.asOf,
+      viewer:
+        logDir === undefined
+          ? undefined
+          : { href: viewerHref(logDir, await $.session.id()), path: `${logDir}/viewer.html` },
+    }
+    const actions: BandActions = {
+      hide: () => void update($, isHiddenAtom, () => true),
+      show: () => void update($, isHiddenAtom, () => false),
+      toggleUnit: () => void update($, unitAtom, unit => (unit === 'tokens' ? 'usd' : 'tokens')),
+    }
+
+    return drawBand($.ui.resolve(e), view, actions, await read($, isHiddenAtom)) ?? next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e, next) => {
+    const cache = await read($, cacheAtom)
+    const now = Math.max(cache.now, await $.clock.now())
+    const logDir = recorder.logDir
+    const view: BandView = {
+      rows: await read($, rowsAtom),
+      promptCount: await read($, promptNoAtom),
+      unit: await read($, unitAtom),
+      isLight: await read($, isLightAtom),
+      cache: cache.expiresAt === null ? undefined : { remainingMs: cache.expiresAt - now, ttlMs: cache.ttlMs },
+      preloaded: await read($, preloadedAtom),
+      sessionUsd: await read($, sessionUsdAtom),
+      columns: e.props.bodyColumns,
+      maxRows: Math.max(e.props.scroll.bodyRows, 16),
+      pricesAsOf: PRICES.asOf,
+      viewer:
+        logDir === undefined
+          ? undefined
+          : { href: viewerHref(logDir, await $.session.id()), path: `${logDir}/viewer.html` },
+    }
+    const actions: BandActions = {
+      hide: () => void $.ui.close({ id: PANE_ID }),
+      show: () => undefined,
+      toggleUnit: () => void update($, unitAtom, unit => (unit === 'tokens' ? 'usd' : 'tokens')),
+    }
+    const { Text } = $.ui.resolve(e)
+
+    return (
+      drawBand($.ui.resolve(e), view, actions, false) ?? (
+        <Text dimColor>The token chart fills in after your first prompt.</Text>
+      )
+    )
   }).catch(($, e, next) => next(e))
 }
