@@ -146,6 +146,27 @@ export function preloadedLine(preloaded: Preloaded, columns: number): string {
   return head + (shown > 0 ? `: ${parts.slice(0, shown).join(' · ')}` : '') + (rest > 0 ? ` · +${rest} more` : '')
 }
 
+/** The context window after the latest prompt that knows it. */
+function latestContext(rows: readonly CostRow[]): CostRow['context'] {
+  return [...rows].reverse().find(row => row.context !== undefined)?.context
+}
+
+/**
+ * `Context now 88k (8.8% of 1M) · re-sent with every request, so bars add up`,
+ * the reason shortened, then dropped, where it does not fit. It sits under
+ * the bars so the two numbers are never read as one.
+ */
+export function contextLine(context: NonNullable<CostRow['context']>, columns: number): string {
+  const head = `Context now ${tokensShort(context.tokens)} (${percent(context.tokens, context.window)} of ${tokensShort(context.window)})`
+  const reason = [' · re-sent with every request, so bars add up', ' · re-sent with every request', '']
+
+  return head + (reason.find(text => head.length + text.length <= columns) ?? '')
+}
+
+/** Under each bar: how many model requests made it. */
+export const requestLabel = (requests: number | undefined): string =>
+  requests === undefined ? '' : `${requests} req`
+
 const rowsFor = (length: number, columns: number): number => Math.max(1, Math.ceil(length / Math.max(1, columns)))
 
 const cut = (label: string, width: number): string =>
@@ -275,13 +296,18 @@ export function drawBand(
 
     return true
   })
+  const context = latestContext(view.rows)
+  const contextText = context === undefined ? undefined : contextLine(context, view.columns)
+  const hasRequests = shown.some(row => row.requests !== undefined)
   const legendText = legend.map(segment => `■ ${segment.label}  `).join('') + `list prices of ${view.pricesAsOf}`
   const linkIntro = view.columns >= 70 ? 'Every prompt, request, context and tool in detail: ' : 'Details: '
   const rowsBeside =
     titleRows +
     (preloaded === undefined ? 0 : rowsFor(preloaded.length, view.columns)) +
     2 +
+    (hasRequests ? 1 : 0) +
     (hasOver ? 1 : 0) +
+    (contextText === undefined ? 0 : rowsFor(contextText.length, view.columns)) +
     rowsFor(legendText.length, view.columns) +
     (view.viewer === undefined ? 0 : 1)
   const height = Math.min(MAX_BAR_ROWS, view.maxRows - rowsBeside)
@@ -298,6 +324,9 @@ export function drawBand(
             shown.reduce((sum, row) => sum + barTotal(row, unit), 0),
             unit,
           )}
+          {context === undefined
+            ? ''
+            : ` · context ${tokensShort(context.tokens)} (${percent(context.tokens, context.window)})`}
         </Text>
         {cache === undefined ? null : (
           <Text dimColor={cache.color === undefined} color={cache.color}>
@@ -353,12 +382,18 @@ export function drawBand(
       <Text mono wrap="truncate">
         {' '.repeat(AXIS) + totals.map(total => padded(amount(total, unit))).join('')}
       </Text>
+      {hasRequests ? (
+        <Text dimColor mono wrap="truncate">
+          {' '.repeat(AXIS) + shown.map(row => padded(requestLabel(row.requests))).join('')}
+        </Text>
+      ) : null}
       {hasOver ? (
         <Text dimColor mono wrap="truncate">
           {' '.repeat(AXIS) +
             shown.map(row => padded(row.overUsd >= NOISE_USD ? `−${money(row.overUsd)}` : '')).join('')}
         </Text>
       ) : null}
+      {contextText === undefined ? null : <Text dimColor>{contextText}</Text>}
       <Box flexDirection="row" flexWrap="wrap">
         {legend.flatMap(segment => [
           <Text color={colorOf(segment.key, view.isLight)}>■</Text>,

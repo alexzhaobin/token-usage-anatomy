@@ -14,7 +14,7 @@ import type { Ports } from './ports'
 import { buildCompactRow, buildContextRow, buildPromptRow, buildRequestRows, labelOf, preloadedOf } from './rows'
 import type { Row } from './rows'
 import { FIVE_MINUTES, MAX_ROWS, ONE_HOUR, initialCache } from './state'
-import { mergeTools, noTokens, priceStep, tokenParts, tokenTotal } from './steps'
+import { contextOf, mergeTools, noTokens, priceStep, tokenParts, tokenTotal } from './steps'
 import type { CharCounts, Step, ToolStat } from './steps'
 import { Agents, priceAgents, summarise } from './subagents'
 import { matchSteps } from './transcript'
@@ -388,7 +388,16 @@ export class Recorder {
       subagentUsd: built.subagentUsd,
       unattributedUsd: built.unattributedUsd,
       overUsd: built.overUsd,
+      requests: priced.length,
     }
+    // The status line's figure, else what the last request was sent.
+    const lastStep = priced.at(-1)
+    const contextTokens = usage.context.tokens ?? (lastStep === undefined ? undefined : contextOf(lastStep.tokens))
+
+    if (contextTokens !== undefined && usage.context.window > 0) {
+      bar.context = { tokens: contextTokens, window: usage.context.window }
+    }
+
     await ports.state.rows.set(rows => [...rows, bar].slice(-MAX_ROWS))
 
     if (engineUsd !== undefined) {

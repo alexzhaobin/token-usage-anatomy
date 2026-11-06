@@ -38,6 +38,14 @@ export type CostRow = {
   unattributedUsd: number
   /** What the mod priced above the engine's session cost. */
   overUsd: number
+  /**
+   * The model requests the prompt took. Each re-sends the whole context, so
+   * a prompt's tokens can be many times the context's size. Absent on bars
+   * an earlier version kept.
+   */
+  requests?: number
+  /** The context window once the prompt was answered, as the status line counts it. */
+  context?: { tokens: number; window: number }
 }
 
 /** When the prompt cache goes cold, for the countdown. */

@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { barCells, barCount, cacheText, preloadedLine, viewerHref } from '../hooks/band'
+import { barCells, barCount, cacheText, contextLine, preloadedLine, requestLabel, viewerHref } from '../hooks/band'
 import { countdown, money, percent, tokensShort } from '../hooks/format'
 import {
   customSlug,
@@ -23,6 +23,8 @@ const row = (n: number, label: string, scale = 1): CostRow => ({
   subagentUsd: 0,
   unattributedUsd: 0,
   overUsd: 0,
+  requests: 4 * scale,
+  context: { tokens: 60_000 + 10_000 * n, window: 1_000_000 },
 })
 
 const ROWS = [row(1, 'Explain the log fields'), row(2, 'Fix the parser', 3), row(3, 'Add tests', 2)]
@@ -108,6 +110,18 @@ describe('bars', () => {
     expect(preloadedLine(preloaded, 90)).toBe(
       'Preloaded context 19.7k (2.0% of 1M) used before you type: System tools 12.5k · +2 more',
     )
+  })
+
+  test('the context line names the window and why bars outgrow it', () => {
+    const context = { tokens: 87_994, window: 1_000_000 }
+
+    expect(contextLine(context, 80)).toBe('Context now 88k (8.8% of 1M) · re-sent with every request, so bars add up')
+    expect(contextLine(context, 60)).toBe('Context now 88k (8.8% of 1M) · re-sent with every request')
+    expect(contextLine(context, 30)).toBe('Context now 88k (8.8% of 1M)')
+  })
+
+  test('each bar counts its requests; bars from an earlier version show none', () => {
+    expect([10, 1, undefined].map(requestLabel)).toEqual(['10 req', '1 req', ''])
   })
 
   test('the viewer link is a file URL, escaped', () => {
@@ -197,6 +211,8 @@ describe('the band', () => {
       expect(await ui.find({ type: 'Text', text: /cache warm 4:00/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /Explai… +Fix th… +Add te…/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: / cache read / })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /4 req +12 req +8 req/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /^Context now 90k \(9\.0% of 1M\) · re-sent with every request/ })).toBeDefined()
 
       await ui.press({ key: 'unit' })
       expect(await ui.find({ type: 'Text', text: /API list-price equivalent per prompt/ })).toBeDefined()
@@ -218,7 +234,7 @@ describe('the band', () => {
     seed(on, BASE)
     const ui = await $.ui.mount({ ...BAND(5), surface: 'terminal' })
 
-    expect(await ui.find({ type: 'Text', text: /last prompt 14.6k · 3 prompts 43.9k/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /last prompt 14.6k · 3 prompts 43.9k · context 90k \(9\.0%\)/ })).toBeDefined()
     await ui.unmount()
   })
 

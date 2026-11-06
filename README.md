@@ -8,7 +8,7 @@ A Claude Code mod that shows how every prompt turns into input, output, cache-re
 
 ## The chart and /token-anatomy
 
-Above the prompt box (terminal and desktop app) a bar per prompt shows its tokens by type: cache reads, cache writes, uncached input, thinking and answer, plus subagents. A button switches to the API list-price equivalent in dollars. The title line counts down until the prompt cache goes cold.
+Above the prompt box (terminal and desktop app) a bar per prompt shows its tokens by type: cache reads, cache writes, uncached input, thinking and answer, plus subagents. A button switches to the API list-price equivalent in dollars. The title line counts down until the prompt cache goes cold. Under each bar is the number of model requests the prompt took, and below the chart the context window as it stands now. Every request re-sends the whole context, so one prompt's bar is often many times the context's size.
 
 - `/token-anatomy` toggles the chart; `show` and `hide` set it.
 - `/token-anatomy open` prints the link to `viewer.html`.

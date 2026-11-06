@@ -149,6 +149,15 @@ describe('a prompt, end to end', () => {
   test('becomes one priced row, enriched from the transcript', async ($, on) => {
     const world = standIn(on)
     world.files.set(TRANSCRIPT, lines(0, 2))
+    // The band's bars, as the mod writes them.
+    const bars: unknown[] = []
+    on('state.set', ($, e, next) => {
+      if (e.plugin === 'token-usage-anatomy' && e.key === 'rows') {
+        bars.push(e.value)
+      }
+
+      return next(e)
+    })
 
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: false })
     await $.classic.SessionStart({ source: 'startup', transcript_path: TRANSCRIPT })
@@ -194,6 +203,9 @@ describe('a prompt, end to end', () => {
       overUsd: 0,
       contextAfterTokens: 7_310,
     })
+    // The bar knows how many requests made it and the context they left.
+    expect(JSON.stringify(bars.at(-1))).toContain('"requests":1,"context":{"tokens":7310,"window":1000000}')
+
     // Prompt text is off by default: neither the label nor the text is logged.
     expect(row?.label).toBeUndefined()
     expect(row?.prompt).toBeUndefined()
