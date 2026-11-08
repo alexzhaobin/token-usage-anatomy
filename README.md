@@ -7,14 +7,14 @@ A Claude Code mod that shows how every prompt turns into input, output, cache-re
 ## Install
 
 ```sh
-claude plugin marketplace add alexzhao/hookworks
+claude plugin marketplace add alexzhaobin/hookworks
 claude plugin install token-usage-anatomy@hookworks
 ```
 
 Or in one step from inside Claude Code (2.1.275 or later):
 
 ```
-/plugin install token-usage-anatomy --marketplace alexzhao/hookworks
+/plugin install token-usage-anatomy --marketplace alexzhaobin/hookworks
 ```
 
 Start a new session afterwards. The chart appears above the prompt once your first prompt is answered. It runs on macOS, Linux and Windows.

@@ -19,5 +19,5 @@ The first release.
 - macOS, Linux and Windows support: transcripts past 4 MiB and log appends go through `scripts/io.sh` or `scripts/io.ps1`.
 - CI on Ubuntu, macOS and Windows: strict validation, unit tests, the plugin directory's file rules, both transcript readers, and the viewer in headless Chrome.
 
-[Unreleased]: https://github.com/alexzhao/token-usage-anatomy/compare/token-usage-anatomy--v0.1.0...HEAD
-[0.1.0]: https://github.com/alexzhao/token-usage-anatomy/releases/tag/token-usage-anatomy--v0.1.0
+[Unreleased]: https://github.com/alexzhaobin/token-usage-anatomy/compare/token-usage-anatomy--v0.1.0...HEAD
+[0.1.0]: https://github.com/alexzhaobin/token-usage-anatomy/releases/tag/token-usage-anatomy--v0.1.0
