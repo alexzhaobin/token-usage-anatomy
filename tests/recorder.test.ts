@@ -34,6 +34,12 @@ type World = {
   logs: string[]
 }
 
+/**
+ * The stand-in's file names. On Windows the test kit hands file events a
+ * native path (`D:\home\me\…` for `/home/me/…`), so both are keyed alike.
+ */
+const fileKey = (path: string): string => path.replace(/\\/g, '/').replace(/^[A-Za-z]:(?=\/)/, '')
+
 function standIn(on: On): World {
   const world: World = { files: new Map(), engineUsd: 0, isBroken: false, logs: [] }
   const fail = (path: string) => {
@@ -63,44 +69,47 @@ function standIn(on: On): World {
   on('agent.list', () => ({ value: [] }))
 
   on('fs.stat', (_, e) => {
-    const text = world.isBroken ? undefined : world.files.get(e.path)
+    const text = world.isBroken ? undefined : world.files.get(fileKey(e.path))
 
-    return text === undefined ? fail(e.path) : { value: { kind: 'file', size: bytes(text), mtimeMs: 1, isLink: false } }
+    return text === undefined ? fail(fileKey(e.path)) : { value: { kind: 'file', size: bytes(text), mtimeMs: 1, isLink: false } }
   })
   on('fs.read', (_, e) => {
-    const text = world.isBroken ? undefined : world.files.get(e.path)
+    const text = world.isBroken ? undefined : world.files.get(fileKey(e.path))
 
-    return text === undefined ? fail(e.path) : { value: e.as === 'bytes' ? { base64: base64Of(text) } : text }
+    return text === undefined ? fail(fileKey(e.path)) : { value: e.as === 'bytes' ? { base64: base64Of(text) } : text }
   })
   on('fs.write', (_, e) => {
     if (world.isBroken) {
-      fail(e.path)
+      fail(fileKey(e.path))
     }
 
-    world.files.set(e.path, e.text)
+    world.files.set(fileKey(e.path), e.text)
 
     return { value: undefined }
   })
-  on('fs.exists', (_, e) => ({ value: world.files.has(e.path) }))
+  on('fs.exists', (_, e) => ({ value: world.files.has(fileKey(e.path)) }))
   on('fs.list', (_, e) => {
     const names = [...world.files.keys()]
-      .filter(path => path.startsWith(`${e.path}/`) && !path.slice(e.path.length + 1).includes('/'))
-      .map(path => path.slice(e.path.length + 1))
+      .filter(path => path.startsWith(`${fileKey(e.path)}/`) && !path.slice(fileKey(e.path).length + 1).includes('/'))
+      .map(path => path.slice(fileKey(e.path).length + 1))
 
     return names.length === 0
-      ? fail(e.path)
+      ? fail(fileKey(e.path))
       : {
           value: names.map(name => ({
             name,
             kind: 'file',
-            size: bytes(world.files.get(`${e.path}/${name}`) ?? ''),
+            size: bytes(world.files.get(`${fileKey(e.path)}/${name}`) ?? ''),
             mtimeMs: 1,
             isLink: false,
           })),
         }
   })
   on('process.run', (_, e) => {
-    const [, , command, path = ''] = e.argv
+    // The helper's command and file follow its script, whichever shell runs it.
+    const at = e.argv.findIndex(arg => arg === 'append' || arg === 'assistant' || arg === 'titles')
+    const command = at < 0 ? '' : e.argv[at]
+    const path = fileKey(at < 0 ? '' : (e.argv[at + 1] ?? ''))
 
     if (world.isBroken || command !== 'append') {
       throw new Error('cannot run')
