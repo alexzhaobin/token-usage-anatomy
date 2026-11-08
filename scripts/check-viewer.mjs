@@ -109,16 +109,26 @@ const batch2 = jsonl([
       [10, 3_000, 54_000, 500, 150, 0, 0, 0.05, 0, 4_000, 0, 0, 0],
     ],
     subagents: {
-      runs: 1, agentCount: 1, requests: 4,
+      starts: 1, runs: 0, agentCount: 1, requests: 4,
       tokens: { input: 40, cacheRead: 60_000, cacheWrite: 20_000, reasoning: 2_000, answer: 3_000 },
       estCostUsd: 0.2,
-      agents: [{ id: 'a1', type: 'Explore', description: '<script>agent</script> search', runs: 1, isRunning: false, requests: 4, tokens: { input: 40, cacheRead: 60_000, cacheWrite: 20_000, reasoning: 2_000, answer: 3_000 }, totalTokens: 85_040, tools: { Grep: { calls: 3, resultChars: 900, errors: 0 } }, estCostUsd: 0.2 }],
+      // Still running when prompt 2 ends; it finishes during prompt 3.
+      agents: [{ id: 'a1', type: 'Explore', description: '<script>agent</script> search', starts: 1, runs: 0, isRunning: true, requests: 4, tokens: { input: 40, cacheRead: 60_000, cacheWrite: 20_000, reasoning: 2_000, answer: 3_000 }, totalTokens: 85_040, tools: { Grep: { calls: 3, resultChars: 900, errors: 0 } }, estCostUsd: 0.2 }],
     },
     estSubagentUsd: 0.2,
   }),
 ])
 const segment2 = jsonl([
-  prompt(3, '2026-01-02T03:30:00.000Z', { cacheMissRequests: 1, recachedTokens: 60_000, cacheCreationTokens: 60_000, idleBeforeMs: 4_000_000, unattributedUsd: 0.01 }),
+  prompt(3, '2026-01-02T03:30:00.000Z', {
+    cacheMissRequests: 1, recachedTokens: 60_000, cacheCreationTokens: 60_000, idleBeforeMs: 4_000_000, unattributedUsd: 0.01,
+    subagents: {
+      starts: 0, runs: 1, agentCount: 1, requests: 1,
+      tokens: { input: 10, cacheRead: 0, cacheWrite: 0, reasoning: 100, answer: 200 },
+      estCostUsd: 0.01,
+      agents: [{ id: 'a1', type: 'Explore', description: 'search', starts: 0, runs: 1, isRunning: false, requests: 1, tokens: { input: 10, cacheRead: 0, cacheWrite: 0, reasoning: 100, answer: 200 }, totalTokens: 310, tools: {}, estCostUsd: 0.01 }],
+    },
+    estSubagentUsd: 0.01,
+  }),
   { kind: 'compact', at: '2026-01-02T03:31:00.000Z', trigger: 'auto', tokensBefore: 180_000, tokensAfter: 30_000 },
   { kind: 'context', at: '2026-01-02T03:31:01.000Z', promptNo: 3, model: 'claude-opus-5-5', totalTokens: 30_000, maxTokens: 0, preloadedTokens: 0, categories: [{ name: 'Messages', tokens: 30_000, kind: 'used' }] },
   prompt(4, '2026-01-02T03:40:00.000Z', { requests: 200_000, contextByStep: huge, peakContextTokens: 0 }),
@@ -316,6 +326,8 @@ try {
   check('notes: dollars are an API list-price equivalent, with the date', notes.includes('API list-price equivalent') && notes.includes(PRICES.asOf))
   check('notes: fast mode counts and rates from the price table', /2 requests ran in fast mode/.test(notes) && /Fast mode rates per million tokens: .*Opus 5\.5 \$8 in \/ \$40 out/.test(notes), notes)
   check('notes: rows from a newer version and unreadable lines are counted', /1 row written by a newer version/.test(notes) && /1 line could not be read/.test(notes), notes)
+  const statuses = await cdp.eval(`[...document.querySelectorAll('#chart-agents tbody tr')].map(r => r.children[0].textContent + ' ' + r.children[3].textContent)`)
+  check('a subagent that outlasts its prompt: started in one row, finished in the next', JSON.stringify(statuses) === JSON.stringify(['#2 started, still running', '#3 finished (started earlier)']), JSON.stringify(statuses))
   check('notes: unattributed cost is explained', /Unattributed \(\$0\.010\)/.test(notes), notes)
 
   const preloaded = await cdp.eval(`document.getElementById('preloaded-note')?.textContent || ''`)

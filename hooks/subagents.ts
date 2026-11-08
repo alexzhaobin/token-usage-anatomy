@@ -28,6 +28,9 @@ const MAX_AGENTS_LISTED = 50
 export type AgentStats = {
   id: string
   steps: Step[]
+  /** Runs that began during the current prompt. */
+  starts: number
+  /** Runs that finished during the current prompt. */
   runs: number
   isRunning: boolean
   tools: Record<string, ToolStat>
@@ -47,6 +50,9 @@ export type PricedAgent = {
 }
 
 export type SubagentSummary = {
+  /** Runs begun during the prompt. */
+  starts: number
+  /** Runs finished during the prompt; a run can begin in one prompt and finish in a later one. */
   runs: number
   agentCount: number
   requests: number
@@ -67,17 +73,34 @@ export class Agents {
     let agent = this.byId.get(id)
 
     if (agent === undefined) {
-      agent = { id, steps: [], runs: 0, isRunning: false, tools: {}, offset: 0, seen: new Set() }
+      agent = { id, steps: [], starts: 0, runs: 0, isRunning: false, tools: {}, offset: 0, seen: new Set() }
       this.byId.set(id, agent)
     }
 
     return agent
   }
 
+  /** A run of the agent began (its first turn). */
+  started(id: string): void {
+    const agent = this.get(id)
+
+    if (!agent.isRunning) {
+      agent.starts += 1
+      agent.isRunning = true
+    }
+  }
+
+  /** A run of the agent finished. */
+  ended(id: string): void {
+    const agent = this.get(id)
+    agent.runs += 1
+    agent.isRunning = false
+  }
+
   /** Agents with something to count. */
   pending(): AgentStats[] {
     return [...this.byId.values()].filter(
-      agent => agent.steps.length > 0 || agent.runs > 0 || Object.keys(agent.tools).length > 0,
+      agent => agent.steps.length > 0 || agent.starts > 0 || agent.runs > 0 || Object.keys(agent.tools).length > 0,
     )
   }
 
@@ -86,6 +109,7 @@ export class Agents {
     for (const agent of agents) {
       if (agent.isRunning) {
         agent.steps = []
+        agent.starts = 0
         agent.runs = 0
         agent.tools = {}
       } else {
@@ -184,6 +208,7 @@ export function summarise(priced: readonly PricedAgent[]): SubagentSummary | und
   }
 
   return {
+    starts: priced.reduce((sum, item) => sum + item.agent.starts, 0),
     runs: priced.reduce((sum, item) => sum + item.agent.runs, 0),
     agentCount: priced.length,
     requests: steps.length,
@@ -202,6 +227,7 @@ export function summarise(priced: readonly PricedAgent[]): SubagentSummary | und
         id: item.agent.id,
         type: item.type,
         description: item.description,
+        starts: item.agent.starts,
         runs: item.agent.runs,
         isRunning: item.agent.isRunning,
         requests: item.steps.length,

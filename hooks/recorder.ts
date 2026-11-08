@@ -165,7 +165,7 @@ export class Recorder {
 
   async turnStart(turnId: string, text: string, agentId: string | undefined): Promise<void> {
     if (agentId !== undefined) {
-      this.agents.get(agentId).isRunning = true
+      this.agents.started(agentId)
 
       return
     }
@@ -263,9 +263,7 @@ export class Recorder {
   }
 
   agentEnded(agentId: string): void {
-    const agent = this.agents.get(agentId)
-    agent.runs += 1
-    agent.isRunning = false
+    this.agents.ended(agentId)
   }
 
   /**

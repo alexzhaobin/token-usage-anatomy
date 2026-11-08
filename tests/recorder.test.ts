@@ -30,10 +30,12 @@ type World = {
   engineUsd: number
   /** Makes every file and process call fail. */
   isBroken: boolean
+  /** What the mod wrote to the debug log. */
+  logs: string[]
 }
 
 function standIn(on: On): World {
-  const world: World = { files: new Map(), engineUsd: 0, isBroken: false }
+  const world: World = { files: new Map(), engineUsd: 0, isBroken: false, logs: [] }
   const fail = (path: string) => {
     throw new Error(`ENOENT: ${path}`)
   }
@@ -48,7 +50,11 @@ function standIn(on: On): World {
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('tool.call', () => ({ result: { stdout: 'a.txt b.txt' }, text: 'a.txt b.txt' }))
-  on('ui.log', () => ({ value: undefined }))
+  on('ui.log', (_, e) => {
+    world.logs.push(e.text)
+
+    return { value: undefined }
+  })
   on('session.id', () => ({ value: 'session-1' }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('session.usage', () => ({
@@ -119,9 +125,9 @@ function standIn(on: On): World {
 // The test runner has timers; the hooks environment's types do not declare them.
 declare const setTimeout: (callback: () => void, ms: number) => unknown
 
-/** Lets the work the mod queued after a hook returned run, up to about two seconds. */
-async function until(done: () => boolean): Promise<void> {
-  for (let i = 0; i < 200 && !done(); i += 1) {
+/** Lets the work the mod queued after a hook returned run, up to `ms` (about two seconds). */
+async function until(done: () => boolean, ms = 2_000): Promise<void> {
+  for (let i = 0; i < ms / 10 && !done(); i += 1) {
     await new Promise<void>(resolve => setTimeout(resolve, 10))
   }
 }
@@ -222,7 +228,8 @@ describe('a prompt, end to end', () => {
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: false })
     await $.turn.start({ turnId: 't1', text: '/help' })
     await $.turn.complete({ turnId: 't1', reason: 'aborted', answer: '', durationMs: 5, isAborted: true })
-    await until(() => false)
+    // Nothing should happen: give anything queued a moment, well inside the test's time limit.
+    await until(() => false, 500)
 
     expect(promptRows(world)).toEqual([])
   })
@@ -275,9 +282,11 @@ describe('robustness', () => {
       isAborted: false,
       usage: USAGE_A,
     })
-    await until(() => false)
+    // The prompt's job fails, is logged, and nothing reaches the session.
+    await until(() => world.logs.some(line => line.includes('write prompt 1 failed')))
 
     expect(result.text).toBe('')
     expect(promptRows(world)).toEqual([])
+    expect(world.logs.some(line => line.includes('write prompt 1 failed'))).toBe(true)
   })
 })

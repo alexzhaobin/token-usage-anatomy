@@ -1315,6 +1315,24 @@
     return card('chart-tools', 'Tool results in the context', 'What each tool’s results added to the context, estimated at four characters a token. Only sizes are recorded, never contents.', hbars(rows, () => 'var(--c-cacheWrite)', 'Tool results by tool'))
   }
 
+  /**
+   * Where a subagent's run stood in this prompt. Runs can outlast the prompt
+   * that started them, and their requests are counted in the prompt in which
+   * each happened. `starts` is absent in rows from before it was recorded.
+   */
+  function agentStatus(agent) {
+    const runs = num(agent.runs)
+    const starts = agent.starts === undefined ? undefined : num(agent.starts)
+    const finished = runs > 1 ? `finished ${runs} runs` : 'finished'
+    if (agent.isRunning === true) {
+      if (starts === 0) return 'still running (started earlier)'
+      if (runs > 0) return `${finished}, then started again, still running`
+      return starts === undefined ? 'still running' : 'started, still running'
+    }
+    if (runs === 0) return starts ? 'started' : 'ran'
+    return starts === 0 ? `${finished} (started earlier)` : finished
+  }
+
   function agentsCard(view) {
     const rows = []
     for (const p of view.prompts) {
@@ -1328,7 +1346,7 @@
           barName(view, p),
           String(agent.type || 'agent'),
           String(agent.description || ''),
-          fmtInt(agent.runs),
+          agentStatus(agent),
           fmtInt(agent.requests),
           fmtTokens(num(agent.totalTokens) || tokenTotal(tokens)),
           fmtPct(tokens.cacheRead, input),
@@ -1339,8 +1357,8 @@
       }
     }
     if (rows.length === 0) return null
-    const head = ['Prompt', 'Type', 'Description', 'Runs', 'Requests', 'Tokens', 'Cache hit', 'Thinking', 'Tool calls', '$ (est.)']
-    return card('chart-agents', 'Subagents', 'Each subagent works in its own context; its tokens are counted with the prompt that started it.', h('div', { class: 'table-wrap' }, dataTable(head, rows, [1, 2])))
+    const head = ['Prompt', 'Type', 'Description', 'Status', 'Requests', 'Tokens', 'Cache hit', 'Thinking', 'Tool calls', '$ (est.)']
+    return card('chart-agents', 'Subagents', 'Each subagent works in its own context. Its requests are counted in the prompt during which they happened, so a subagent still running when its prompt ended carries on into the next prompt’s row.', h('div', { class: 'table-wrap' }, dataTable(head, rows, [1, 2, 3])))
   }
 
   function hitCard(view, width) {

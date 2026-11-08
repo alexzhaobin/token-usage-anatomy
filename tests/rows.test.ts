@@ -4,7 +4,7 @@ import type { SessionUsage } from 'claude-code'
 import { buildPromptRow, labelOf, preloadedOf } from '../hooks/rows'
 import { priceStep } from '../hooks/steps'
 import type { Step } from '../hooks/steps'
-import { subagentPath, summarise } from '../hooks/subagents'
+import { Agents, subagentPath, summarise } from '../hooks/subagents'
 
 const step = (overrides: Partial<Step> = {}): Step => ({
   index: 0,
@@ -124,12 +124,38 @@ describe('subagents', () => {
     expect(subagentPath('/p/abc.jsonl', 'a1')).toBe('/p/abc/subagents/agent-a1.jsonl')
   })
 
+  test('a run that outlasts its prompt: started in one row, finished in the next', () => {
+    const agents = new Agents()
+
+    // Prompt 1: the agent starts and is still running when the prompt ends.
+    agents.started('a1')
+    agents.started('a1') // a second turn of the same run is not a second start
+    const first = agents.pending()
+    expect(first.map(agent => ({ starts: agent.starts, runs: agent.runs, isRunning: agent.isRunning }))).toEqual([
+      { starts: 1, runs: 0, isRunning: true },
+    ])
+    agents.settle(first)
+
+    // Prompt 2: it finishes, having started earlier.
+    agents.ended('a1')
+    const second = agents.pending()
+    expect(second.map(agent => ({ starts: agent.starts, runs: agent.runs, isRunning: agent.isRunning }))).toEqual([
+      { starts: 0, runs: 1, isRunning: false },
+    ])
+    agents.settle(second)
+
+    // Finished agents are forgotten; a new run counts afresh.
+    expect(agents.pending()).toEqual([])
+    agents.started('a1')
+    expect(agents.pending()[0]?.starts).toBe(1)
+  })
+
   test('summed per prompt, with each agent listed', () => {
-    const agent = { id: 'a1', steps: [], runs: 1, isRunning: false, tools: { Read: { calls: 2, resultChars: 80, errors: 0 } }, offset: 0, seen: new Set<string>() }
+    const agent = { id: 'a1', steps: [], starts: 1, runs: 1, isRunning: false, tools: { Read: { calls: 2, resultChars: 80, errors: 0 } }, offset: 0, seen: new Set<string>() }
     const summary = summarise([{ agent, steps: [priceStep(step(), undefined)], type: 'Explore', description: 'Find the parser' }])
 
-    expect(summary).toMatchObject({ runs: 1, agentCount: 1, requests: 1, estCostUsd: 0.012 })
-    expect(summary?.agents[0]).toMatchObject({ id: 'a1', type: 'Explore', requests: 1, tools: { Read: { calls: 2 } } })
+    expect(summary).toMatchObject({ starts: 1, runs: 1, agentCount: 1, requests: 1, estCostUsd: 0.012 })
+    expect(summary?.agents[0]).toMatchObject({ id: 'a1', type: 'Explore', starts: 1, runs: 1, requests: 1, tools: { Read: { calls: 2 } } })
     expect(summarise([])).toBeUndefined()
   })
 })
