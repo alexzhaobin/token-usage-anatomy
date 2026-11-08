@@ -5,6 +5,7 @@
 //   <logDir>/data/<id>.js, <id>.2.js, ...     the same rows for viewer.html
 //   <logDir>/usage-index.js                  sessions, newest first
 //   <logDir>/pricing.js                      the price table the rows used
+//   <logDir>/viewer.html                     a copy of assets/viewer.html
 //
 // A session's rows roll over to a new segment before a file would pass
 // 2 MiB, so every file stays readable whole by the module's own file API.
@@ -209,11 +210,24 @@ export class Logbook {
     await this.ports.fs.write(path, text)
   }
 
+  /** Copies the viewer page beside the logs, unless the copy there is the same. */
+  async installViewer(): Promise<void> {
+    try {
+      const page = await this.ports.fs.read(`${this.host.pluginRoot}/assets/viewer.html`)
+      await this.writeIfChanged(`${this.dir}/viewer.html`, page)
+    } catch (error) {
+      // The logs matter more than the page: log it and go on.
+      this.ports.debug(`token-usage-anatomy: viewer.html not installed: ${String(error)}`)
+    }
+  }
+
   /**
-   * Brings the folder up to date: the price table, a viewer copy for every
-   * log segment missing one or older than its log, and the index.
+   * Brings the folder up to date: the viewer page, the price table, a
+   * viewer copy for every log segment missing one or older than its log,
+   * and the index.
    */
   async refresh(): Promise<void> {
+    await this.installViewer()
     await this.writeIfChanged(`${this.dir}/pricing.js`, pricingScript())
 
     const logs = await this.ports.fs.list(this.dir)

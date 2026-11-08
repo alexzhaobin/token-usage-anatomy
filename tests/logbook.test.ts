@@ -142,6 +142,35 @@ describe('Logbook', () => {
     expect(world.files.get(`${DIR}/pricing.js`)?.mtimeMs).toBe(before)
   })
 
+  test('refresh installs the viewer page, and only rewrites it when it changed', async () => {
+    const world = fakeWorld()
+    world.files.set('/plugin/assets/viewer.html', { text: '<!doctype html><title>v1</title>', mtimeMs: 1 })
+    const book = new Logbook(world.ports, HOST, DIR)
+
+    await book.refresh()
+    expect(world.files.get(`${DIR}/viewer.html`)?.text).toBe('<!doctype html><title>v1</title>')
+    const installedAt = world.files.get(`${DIR}/viewer.html`)?.mtimeMs
+
+    await book.refresh()
+    expect(world.files.get(`${DIR}/viewer.html`)?.mtimeMs).toBe(installedAt)
+
+    world.files.set('/plugin/assets/viewer.html', { text: '<!doctype html><title>v2</title>', mtimeMs: 2 })
+    await book.refresh()
+    expect(world.files.get(`${DIR}/viewer.html`)?.text).toBe('<!doctype html><title>v2</title>')
+  })
+
+  test('without its viewer page the folder is still refreshed', async () => {
+    const world = fakeWorld()
+    world.files.set(`${DIR}/s1.jsonl`, { text: '{"kind":"prompt"}\n', mtimeMs: 50 })
+    const book = new Logbook(world.ports, HOST, DIR)
+
+    await book.refresh()
+
+    expect(world.logs.some(line => line.includes('viewer.html not installed'))).toBe(true)
+    expect(world.files.has(`${DIR}/viewer.html`)).toBe(false)
+    expect(world.files.has(`${DIR}/data/s1.js`)).toBe(true)
+  })
+
   test('a failing job is logged and the queue goes on', async () => {
     const world = fakeWorld()
     const book = new Logbook(world.ports, HOST, DIR)

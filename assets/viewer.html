@@ -1,0 +1,1555 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Usage Anatomy</title>
+<!--
+  Token Usage Anatomy: the viewer for the log folder this page sits in.
+
+  It reads three kinds of file beside it, all written by the mod:
+    usage-index.js   window.TUA_INDEX: the sessions, newest first
+    pricing.js       window.TUA_PRICES: the price table the rows were priced with
+    data/<id>.js     window.TUA_DATA batches: each session's log rows as text
+  A page opened from disk cannot fetch the .jsonl logs themselves, hence
+  the .js copies. It can also read .jsonl files you open or drop on it.
+
+  Nothing here talks to the network. There are no libraries: the charts
+  are hand-built SVG, and every piece of logged text is set as text, never
+  as markup.
+-->
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f6f6f3;
+    --fg: #1d1d1b;
+    --muted: #5d5c57;
+    --card: #ffffff;
+    --border: #dcdbd4;
+    --grid: #e9e8e2;
+    --tip-bg: #ffffff;
+    --tip-fg: #1d1d1b;
+    --focus: #1f5fb0;
+    --drop: #eef3fb;
+    --c-cacheRead: #2a78d6;
+    --c-cacheWrite: #eb6834;
+    --c-input: #1baf7a;
+    --c-reasoning: #eda100;
+    --c-answer: #e87ba4;
+    --c-subagents: #008300;
+    --c-unattributed: #8a8984;
+    --c-hit: #2a78d6;
+    --c-context: #2a78d6;
+    --c-window: #d63c3c;
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #141413;
+    --fg: #ecebe5;
+    --muted: #a6a59e;
+    --card: #1e1e1c;
+    --border: #383834;
+    --grid: #2b2b28;
+    --tip-bg: #2b2b29;
+    --tip-fg: #ecebe5;
+    --focus: #6aa7f0;
+    --drop: #1c2533;
+    --c-cacheRead: #3987e5;
+    --c-cacheWrite: #d95926;
+    --c-input: #199e70;
+    --c-reasoning: #c98500;
+    --c-answer: #d55181;
+    --c-subagents: #008300;
+    --c-unattributed: #6b6a64;
+    --c-hit: #3987e5;
+    --c-context: #3987e5;
+    --c-window: #e0605a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root[data-theme="auto"] {
+      color-scheme: dark;
+      --bg: #141413;
+      --fg: #ecebe5;
+      --muted: #a6a59e;
+      --card: #1e1e1c;
+      --border: #383834;
+      --grid: #2b2b28;
+      --tip-bg: #2b2b29;
+      --tip-fg: #ecebe5;
+      --focus: #6aa7f0;
+      --drop: #1c2533;
+      --c-cacheRead: #3987e5;
+      --c-cacheWrite: #d95926;
+      --c-input: #199e70;
+      --c-reasoning: #c98500;
+      --c-answer: #d55181;
+      --c-subagents: #008300;
+      --c-unattributed: #6b6a64;
+      --c-hit: #3987e5;
+      --c-context: #3987e5;
+      --c-window: #e0605a;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header, main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  header { padding-bottom: 0; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 16px; margin: 0 0 4px; }
+  h3 { font-size: 13px; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); margin: 2px 0 12px; overflow-wrap: anywhere; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .controls select { max-width: 100%; }
+  button, select, .button {
+    font: inherit;
+    color: var(--fg);
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+  button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .segmented { display: inline-flex; }
+  .segmented button { border-radius: 0; }
+  .segmented button:first-child { border-radius: 6px 0 0 6px; }
+  .segmented button:last-child { border-radius: 0 6px 6px 0; border-left: 0; }
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+  }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin: 0 0 16px;
+  }
+  .lede { color: var(--muted); margin: 0 0 12px; max-width: 75ch; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 12px; margin: 0 0 16px; }
+  .tile { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; min-width: 0; }
+  .tile .name { color: var(--muted); font-size: 12px; }
+  .tile .value { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .tile .more { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  .insights { margin: 0; padding-left: 20px; }
+  .insights li { margin: 0 0 6px; max-width: 90ch; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+  .legend button { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; font-size: 12px; }
+  .legend button[aria-pressed="true"] { background: var(--card); color: var(--fg); border-color: var(--border); }
+  .legend button[aria-pressed="false"] { opacity: 0.55; text-decoration: line-through; }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .scroll { overflow-x: auto; overflow-y: hidden; padding: 2px; }
+  svg.chart { display: block; }
+  svg.chart text { fill: var(--muted); font-size: 11px; font-family: inherit; }
+  svg.chart .grid { stroke: var(--grid); stroke-width: 1; }
+  svg.chart .axis { stroke: var(--border); stroke-width: 1; }
+  svg.chart .active { fill: none; stroke: var(--fg); stroke-width: 1.5; }
+  .multiples { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .multiples > div { min-width: 0; }
+
+  .hbars { width: 100%; border-collapse: collapse; }
+  .hbars th, .hbars td { padding: 3px 6px; text-align: left; vertical-align: middle; font-weight: normal; }
+  .hbars th { white-space: nowrap; max-width: 30ch; overflow: hidden; text-overflow: ellipsis; }
+  .hbars td.bar { width: 55%; }
+  .hbars .fill { height: 12px; border-radius: 2px; min-width: 1px; }
+  .hbars td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }
+
+  details > summary { cursor: pointer; font-weight: 600; }
+  .table-wrap { overflow-x: auto; margin-top: 8px; }
+  table.data { border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+  table.data th, table.data td { border-bottom: 1px solid var(--grid); padding: 4px 6px; text-align: right; white-space: nowrap; }
+  table.data th { position: sticky; top: 0; background: var(--card); color: var(--muted); font-weight: 600; }
+  table.data td.text, table.data th.text { text-align: left; max-width: 36ch; overflow: hidden; text-overflow: ellipsis; }
+  .tag { display: inline-block; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 4px; font-size: 11px; color: var(--muted); }
+  .notes ul { margin: 0; padding-left: 20px; }
+  .notes li { margin: 0 0 6px; max-width: 95ch; }
+  .muted { color: var(--muted); }
+
+  #empty {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 40px 16px;
+    text-align: center;
+    color: var(--muted);
+    margin: 0 0 16px;
+  }
+  body.dragging #empty, body.dragging main { background: var(--drop); }
+  #tip {
+    position: fixed;
+    z-index: 10;
+    max-width: 340px;
+    background: var(--tip-bg);
+    color: var(--tip-fg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 12px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+    pointer-events: none;
+  }
+  #tip[hidden] { display: none; }
+  #tip .head { font-weight: 650; margin-bottom: 4px; overflow-wrap: anywhere; }
+  #tip .row { display: flex; gap: 12px; justify-content: space-between; }
+  #tip .row span:last-child { font-variant-numeric: tabular-nums; }
+</style>
+<script src="usage-index.js"></script>
+<script src="pricing.js"></script>
+</head>
+<body>
+<header>
+  <h1>Token Usage Anatomy</h1>
+  <p class="subtitle" id="subtitle">Loading…</p>
+  <div class="controls">
+    <label for="session" class="visually-hidden">Session</label>
+    <select id="session"></select>
+    <span class="segmented" role="group" aria-label="Show">
+      <button type="button" id="unit-tokens" aria-pressed="true">Tokens</button>
+      <button type="button" id="unit-usd" aria-pressed="false">$ API list-price equivalent</button>
+    </span>
+    <button type="button" id="open-files">Open .jsonl files…</button>
+    <input type="file" id="file-input" class="visually-hidden" multiple accept=".jsonl,.json,.txt" tabindex="-1" aria-hidden="true">
+    <button type="button" id="reload">Reload</button>
+    <button type="button" id="theme">Theme: auto</button>
+  </div>
+</header>
+<main id="main"></main>
+<div id="tip" role="tooltip" hidden></div>
+<p id="live" class="visually-hidden" aria-live="polite"></p>
+<script>
+(function () {
+  'use strict'
+
+  // ---------------------------------------------------------------- basics
+
+  const SCHEMA = 'token-usage-anatomy/'
+  /** The schema major versions this page reads. */
+  const READS = [1]
+  const SVG_NS = 'http://www.w3.org/2000/svg'
+
+  /**
+   * The parts of a prompt's tokens, bottom of each bar first. Each part
+   * keeps its colour everywhere, as it does in the band above the prompt.
+   */
+  const PARTS = [
+    { key: 'cacheRead', label: 'Cache read' },
+    { key: 'cacheWrite', label: 'Cache write' },
+    { key: 'input', label: 'Uncached input' },
+    { key: 'reasoning', label: 'Thinking' },
+    { key: 'answer', label: 'Answer' },
+    { key: 'subagents', label: 'Subagents' },
+    { key: 'unattributed', label: 'Unattributed', usdOnly: true },
+  ]
+  const color = key => `var(--c-${key})`
+
+  /** A finite number, or 0: no NaN reaches the page. */
+  const num = value => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
+
+  /** The largest value, without spreading the array (safe for any length). */
+  function maxOf(values) {
+    let max = 0
+    for (let i = 0; i < values.length; i += 1) {
+      const value = num(values[i])
+      if (value > max) max = value
+    }
+    return max
+  }
+
+  const sum = (items, pick) => {
+    let total = 0
+    for (const item of items) total += num(pick(item))
+    return total
+  }
+
+  const trimZero = text => text.replace(/\.0$/, '')
+
+  /** 999, 8.2k, 150k, 1M, 1.3M: as the band writes them. */
+  function fmtTokens(value) {
+    const v = num(value)
+    const a = Math.abs(v)
+    if (a < 1000) return String(Math.round(v))
+    if (a < 999500) {
+      const k = v / 1000
+      return (Math.abs(k) < 100 ? trimZero(k.toFixed(1)) : String(Math.round(k))) + 'k'
+    }
+    return trimZero((v / 1e6).toFixed(1)) + 'M'
+  }
+
+  /** $123, $12.3, $0.12, $0.012, <$0.001, $0. */
+  function fmtUsd(value) {
+    const v = num(value)
+    if (v === 0) return '$0'
+    if (v < 0) return '−' + fmtUsd(-v)
+    if (v < 0.001) return '<$0.001'
+    if (v < 0.1) return '$' + v.toFixed(3)
+    if (v < 10) return '$' + v.toFixed(2)
+    if (v < 100) return '$' + v.toFixed(1)
+    return '$' + Math.round(v).toLocaleString('en-US')
+  }
+
+  const fmtUsdExact = value => '$' + num(value).toFixed(num(value) < 1 ? 5 : 2)
+  const fmtInt = value => Math.round(num(value)).toLocaleString()
+  const fmtPct = (part, whole) => (num(whole) > 0 ? (num(part) / num(whole) * 100).toFixed(1) + '%' : '–')
+  const fmtShare = (part, whole) => (num(whole) > 0 ? Math.round(num(part) / num(whole) * 100) + '%' : '–')
+  const plural = (count, one, many) => `${fmtInt(count)} ${count === 1 ? one : many || one + 's'}`
+
+  function fmtDuration(ms) {
+    const s = Math.round(num(ms) / 1000)
+    if (s < 60) return s + ' s'
+    if (s < 3600) return Math.floor(s / 60) + ' min ' + (s % 60) + ' s'
+    return Math.floor(s / 3600) + ' h ' + Math.floor((s % 3600) / 60) + ' min'
+  }
+
+  /** In the reader's own time zone. */
+  function fmtTime(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return ''
+    return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
+
+  /** An element; strings become text nodes, so logged text is never markup. */
+  function h(tag, props, ...children) {
+    const node = document.createElement(tag)
+    setProps(node, props)
+    append(node, children)
+    return node
+  }
+
+  function svg(tag, props, ...children) {
+    const node = document.createElementNS(SVG_NS, tag)
+    setProps(node, props)
+    append(node, children)
+    return node
+  }
+
+  function setProps(node, props) {
+    for (const [name, value] of Object.entries(props || {})) {
+      if (value === undefined || value === null || value === false) continue
+      if (name === 'class') node.setAttribute('class', value)
+      else if (name === 'text') node.textContent = String(value)
+      else if (name === 'style' && typeof value === 'object') Object.assign(node.style, value)
+      else if (name.startsWith('on') && typeof value === 'function') node.addEventListener(name.slice(2), value)
+      else node.setAttribute(name, value === true ? '' : String(value))
+    }
+  }
+
+  function append(node, children) {
+    for (const child of children.flat(Infinity)) {
+      if (child === undefined || child === null || child === false) continue
+      node.append(child instanceof Node ? child : document.createTextNode(String(child)))
+    }
+  }
+
+  function remember(key, fallback) {
+    try {
+      return localStorage.getItem(key) || fallback
+    } catch (error) {
+      return fallback
+    }
+  }
+
+  function keep(key, value) {
+    try {
+      localStorage.setItem(key, value)
+    } catch (error) {
+      // Private windows and pages from disk may refuse storage; nothing depends on it.
+    }
+  }
+
+  // ---------------------------------------------------------------- state
+
+  const state = {
+    /** id -> session: rows read, whether its data file was found. */
+    sessions: new Map(),
+    /** A session id or 'all'. */
+    current: null,
+    unit: remember('tua-unit', 'tokens') === 'usd' ? 'usd' : 'tokens',
+    theme: remember('tua-theme', 'auto'),
+    /** Parts switched off in the legends. */
+    hidden: new Set(),
+    /** The snapshot picked in "What fills the context window". */
+    snapshot: null,
+  }
+
+  function sessionFor(id) {
+    let session = state.sessions.get(id)
+    if (!session) {
+      session = {
+        id,
+        title: undefined,
+        mtimeMs: 0,
+        segments: 1,
+        isLoaded: false,
+        missing: [],
+        prompts: [],
+        contexts: [],
+        compacts: [],
+        newerRows: 0,
+        badLines: 0,
+      }
+      state.sessions.set(id, session)
+    }
+    return session
+  }
+
+  // ---------------------------------------------------------------- rows
+
+  /** Reads one batch of log text into its session. */
+  function ingest(id, text) {
+    const session = sessionFor(String(id))
+    for (const line of String(text).split('\n')) {
+      if (line.trim() === '') continue
+      let row
+      try {
+        row = JSON.parse(line)
+      } catch (error) {
+        session.badLines += 1
+        continue
+      }
+      if (!row || typeof row !== 'object') continue
+      const major = typeof row.schema === 'string' && row.schema.startsWith(SCHEMA) ? Number(row.schema.slice(SCHEMA.length)) : NaN
+      if (!READS.includes(major)) {
+        if (major > Math.max(...READS)) session.newerRows += 1
+        continue
+      }
+      const at = new Date(row.at)
+      if (row.kind === 'prompt') session.prompts.push(normalisePrompt(row, session, at))
+      else if (row.kind === 'context') session.contexts.push(normaliseContext(row, session, at))
+      else if (row.kind === 'compact') session.compacts.push({ session, at, trigger: row.trigger, before: num(row.tokensBefore), after: num(row.tokensAfter), summarizer: row.summarizer })
+      else if (row.kind === 'session' && typeof row.title === 'string') session.title = row.title
+    }
+  }
+
+  function partsOf(source) {
+    const parts = source || {}
+    return { input: num(parts.input), cacheRead: num(parts.cacheRead), cacheWrite: num(parts.cacheWrite), reasoning: num(parts.reasoning), answer: num(parts.answer) }
+  }
+
+  const tokenTotal = parts => parts.input + parts.cacheRead + parts.cacheWrite + parts.reasoning + parts.answer
+
+  function normalisePrompt(r, session, at) {
+    const output = num(r.outputTokens)
+    const reasoning = num(r.reasoningTokens)
+    const tokens = {
+      input: num(r.inputTokens),
+      cacheRead: num(r.cacheReadTokens),
+      cacheWrite: num(r.cacheCreationTokens),
+      reasoning,
+      answer: r.answerTokens === undefined ? Math.max(0, output - reasoning) : num(r.answerTokens),
+    }
+    const agents = r.subagents && typeof r.subagents === 'object' ? r.subagents : undefined
+    const agentTokens = agents ? partsOf(agents.tokens) : partsOf()
+    const usdParts = partsOf(r.estCostParts)
+    const byStep = Array.isArray(r.contextByStep) ? r.contextByStep : []
+    const requests = num(r.requests)
+
+    return {
+      session,
+      n: num(r.promptNo),
+      at,
+      label: typeof r.label === 'string' ? r.label : undefined,
+      prompt: typeof r.prompt === 'string' ? r.prompt : undefined,
+      model: typeof r.model === 'string' ? r.model : '',
+      models: r.models && typeof r.models === 'object' ? r.models : {},
+      effort: typeof r.effort === 'string' ? r.effort : '',
+      requests,
+      durationMs: num(r.durationMs),
+      idleBeforeMs: r.idleBeforeMs === undefined ? undefined : num(r.idleBeforeMs),
+      tokens,
+      agentTokens,
+      values: {
+        tokens: { ...tokens, subagents: tokenTotal(agentTokens), unattributed: 0 },
+        usd: { ...usdParts, subagents: num(r.estSubagentUsd), unattributed: num(r.unattributedUsd) },
+      },
+      overUsd: num(r.overUsd),
+      write5m: num(r.cacheWrite5mTokens),
+      write1h: num(r.cacheWrite1hTokens),
+      coldRequests: num(r.cacheMissRequests),
+      recachedTokens: num(r.recachedTokens),
+      contextEnd: num(r.contextTokens),
+      contextPeak: Math.max(num(r.peakContextTokens), maxOf(byStep)),
+      contextByStep: byStep,
+      contextWindow: num(r.contextWindow),
+      contextAfter: r.contextAfterTokens === undefined ? undefined : num(r.contextAfterTokens),
+      tools: r.tools && typeof r.tools === 'object' ? r.tools : {},
+      toolResultTokens: num(r.toolResultTokensEst),
+      agents,
+      reasoningMethod: typeof r.reasoningMethod === 'string' ? r.reasoningMethod : undefined,
+      fastRequests: num(r.fastRequests),
+      usOnlyRequests: num(r.usOnlyRequests),
+      pricesAsOf: typeof r.pricesAsOf === 'string' ? r.pricesAsOf : undefined,
+      detail: requestDetailOf(r),
+    }
+  }
+
+  /** The compact per-request arrays, back into objects, numbered within the prompt. */
+  function requestDetailOf(r) {
+    const fields = Array.isArray(r.requestFields) ? r.requestFields : []
+    const models = Array.isArray(r.requestModels) ? r.requestModels : []
+    const rows = Array.isArray(r.requestDetail) ? r.requestDetail : []
+    const first = Math.max(0, num(r.requests) - rows.length)
+
+    return rows.map((values, i) => {
+      const item = { k: first + i + 1 }
+      fields.forEach((field, j) => {
+        item[field] = Array.isArray(values) ? values[j] : undefined
+      })
+      item.model = typeof models[num(item.model)] === 'string' ? models[num(item.model)] : ''
+      return item
+    })
+  }
+
+  function normaliseContext(r, session, at) {
+    const categories = (Array.isArray(r.categories) ? r.categories : [])
+      .filter(c => c && typeof c.name === 'string')
+      .map(c => ({ name: c.name, tokens: num(c.tokens), kind: typeof c.kind === 'string' ? c.kind : 'used' }))
+    return {
+      session,
+      at,
+      n: num(r.promptNo),
+      model: typeof r.model === 'string' ? r.model : '',
+      window: num(r.window),
+      total: num(r.totalTokens),
+      max: num(r.maxTokens),
+      preloaded: num(r.preloadedTokens),
+      categories,
+    }
+  }
+
+  // ---------------------------------------------------------------- loading
+
+  function loadScript(src) {
+    return new Promise(resolve => {
+      const tag = document.createElement('script')
+      tag.src = src
+      tag.onload = () => {
+        tag.remove()
+        resolve(true)
+      }
+      tag.onerror = () => {
+        tag.remove()
+        resolve(false)
+      }
+      document.head.append(tag)
+    })
+  }
+
+  /** Reads every batch the data files pushed, then lets the text go. */
+  function drain() {
+    const batches = Array.isArray(window.TUA_DATA) ? window.TUA_DATA : []
+    window.TUA_DATA = []
+    for (const batch of batches) {
+      if (Array.isArray(batch) && batch.length === 2) ingest(batch[0], batch[1])
+    }
+  }
+
+  const dataName = (id, segment) => (segment <= 1 ? `${id}.js` : `${id}.${segment}.js`)
+
+  async function loadSession(session) {
+    if (session.isLoaded) return
+    session.isLoaded = true
+    for (let segment = 1; segment <= Math.max(1, session.segments); segment += 1) {
+      const name = dataName(session.id, segment)
+      const isFound = await loadScript('data/' + encodeURIComponent(name))
+      if (!isFound) session.missing.push('data/' + name)
+      drain()
+    }
+  }
+
+  function readIndex() {
+    const index = Array.isArray(window.TUA_INDEX) ? window.TUA_INDEX : []
+    for (const entry of index) {
+      if (!entry || typeof entry.id !== 'string') continue
+      const session = sessionFor(entry.id)
+      session.mtimeMs = num(entry.mtimeMs)
+      session.segments = Math.max(1, num(entry.segments))
+      if (typeof entry.title === 'string' && session.title === undefined) session.title = entry.title
+    }
+  }
+
+  async function openFiles(files) {
+    const opened = new Set()
+    for (const file of Array.from(files || [])) {
+      const match = /^(.+?)(?:\.(\d+))?\.jsonl?$/.exec(file.name)
+      const id = match ? match[1] : file.name
+      const text = await file.text()
+      const session = sessionFor(id)
+      session.isLoaded = true
+      session.isFromFile = true
+      session.mtimeMs = Math.max(session.mtimeMs, file.lastModified || 0)
+      ingest(id, text)
+      opened.add(id)
+    }
+    if (opened.size === 0) return
+    fillPicker()
+    choose(opened.size === 1 ? [...opened][0] : 'all')
+  }
+
+  // ---------------------------------------------------------------- choosing
+
+  const sessionsNewestFirst = () => [...state.sessions.values()].sort((a, b) => b.mtimeMs - a.mtimeMs)
+
+  function sessionName(session) {
+    return session.title || 'Untitled session'
+  }
+
+  function fillPicker() {
+    const picker = document.getElementById('session')
+    picker.textContent = ''
+    const sessions = sessionsNewestFirst()
+    if (sessions.length > 1) picker.append(h('option', { value: 'all', text: `All sessions (${sessions.length})` }))
+    for (const session of sessions) {
+      const when = session.mtimeMs ? new Date(session.mtimeMs).toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' · ' : ''
+      picker.append(h('option', { value: session.id, text: `${when}${sessionName(session)} · ${session.id.slice(0, 8)}` }))
+    }
+    picker.hidden = sessions.length === 0
+    if (state.current) picker.value = state.current
+  }
+
+  /** The session the URL names, or the newest; a malformed hash falls back. */
+  function fromHash() {
+    let wanted = ''
+    try {
+      wanted = decodeURIComponent(location.hash.slice(1))
+    } catch (error) {
+      wanted = ''
+    }
+    if (wanted === 'all' && state.sessions.size > 1) return 'all'
+    if (state.sessions.has(wanted)) return wanted
+    const newest = sessionsNewestFirst()[0]
+    return newest ? newest.id : null
+  }
+
+  async function choose(id) {
+    state.current = id
+    state.snapshot = null
+    const picker = document.getElementById('session')
+    if (id) picker.value = id
+    const wantedHash = id ? '#' + encodeURIComponent(id) : ''
+    if (id && location.hash !== wantedHash) history.replaceState(null, '', wantedHash)
+    setSubtitle('Loading…')
+    if (id === 'all') {
+      for (const session of sessionsNewestFirst()) await loadSession(session)
+    } else if (id) {
+      await loadSession(state.sessions.get(id))
+    }
+    if (state.current === id) render()
+  }
+
+  // ---------------------------------------------------------------- the view
+
+  /** What the chosen session (or every session) holds, oldest first. */
+  function viewOf() {
+    const isAll = state.current === 'all'
+    const sessions = isAll ? sessionsNewestFirst().reverse() : [state.sessions.get(state.current)].filter(Boolean)
+    const byTime = (a, b) => num(a.at.getTime()) - num(b.at.getTime())
+    const prompts = sessions.flatMap(s => s.prompts).sort((a, b) => (isAll ? byTime(a, b) : a.n - b.n || byTime(a, b)))
+    const contexts = sessions.flatMap(s => s.contexts).sort(byTime)
+    const compacts = sessions.flatMap(s => s.compacts).sort(byTime)
+    const order = new Map(sessions.map((s, i) => [s, i + 1]))
+    return { isAll, sessions, prompts, contexts, compacts, order }
+  }
+
+  const barName = (view, p) => (view.isAll ? `S${view.order.get(p.session)}·${p.n}` : `#${p.n}`)
+  const unitIsUsd = () => state.unit === 'usd'
+  const amount = value => (unitIsUsd() ? fmtUsd(value) : fmtTokens(value))
+  const partsShown = () => PARTS.filter(part => !part.usdOnly || unitIsUsd())
+  const valuesOf = p => p.values[state.unit]
+  const barTotal = p => {
+    const values = valuesOf(p)
+    return PARTS.reduce((total, part) => total + num(values[part.key]), 0)
+  }
+  const allTokens = p => tokenTotal(p.tokens) + tokenTotal(p.agentTokens)
+  const allUsd = p => {
+    const v = p.values.usd
+    return v.input + v.cacheRead + v.cacheWrite + v.reasoning + v.answer + v.subagents + v.unattributed
+  }
+
+  function setSubtitle(text) {
+    document.getElementById('subtitle').textContent = text
+  }
+
+  function render() {
+    hideTip()
+    const main = document.getElementById('main')
+    main.textContent = ''
+    const view = viewOf()
+    const one = view.isAll ? undefined : view.sessions[0]
+
+    if (view.isAll) {
+      setSubtitle(`All sessions (${view.sessions.length}): ${plural(view.prompts.length, 'prompt')}`)
+      document.title = 'All sessions · Token Usage Anatomy'
+    } else if (one) {
+      setSubtitle(`${sessionName(one)} · session ${one.id.slice(0, 8)}`)
+      document.title = `${sessionName(one)} · Token Usage Anatomy`
+    } else {
+      setSubtitle('No sessions found')
+      document.title = 'Token Usage Anatomy'
+    }
+
+    if (view.prompts.length === 0) {
+      main.append(emptyState(view, one))
+      return
+    }
+
+    const width = Math.max(260, main.clientWidth - 34)
+    main.append(
+      tiles(view),
+      insightsCard(view),
+      promptsCard(view, width),
+      growthCard(view, width),
+      multiplesCard(view),
+      contextCard(view, width),
+      windowCard(view),
+      toolsCard(view),
+      agentsCard(view),
+      hitCard(view, width),
+      promptTableCard(view),
+      requestTableCard(view),
+      notesCard(view),
+    )
+  }
+
+  function emptyState(view, one) {
+    let message = 'No data loaded. This page reads the log folder it sits in (~/.claude/token-usage-anatomy by default). Open it from there, or open or drop .jsonl log files here.'
+    if (one && one.missing.length > 0 && one.prompts.length === 0) {
+      message = `This session's data file ${one.missing[0]} is missing. Starting a new Claude Code session rebuilds it from the .jsonl log; or open the log here.`
+    } else if (one) {
+      message = 'No completed prompts yet in this session. Rows appear here once a prompt has been answered; Reload to see them.'
+    }
+    return h('div', { id: 'empty', role: 'status' }, h('p', { text: message }), h('p', {}, h('button', { type: 'button', text: 'Open .jsonl files…', onclick: () => document.getElementById('file-input').click() })))
+  }
+
+  // ---------------------------------------------------------------- tiles
+
+  function tile(name, value, more) {
+    return h('div', { class: 'tile' }, h('div', { class: 'name', text: name }), h('div', { class: 'value', text: value }), more ? h('div', { class: 'more', text: more }) : null)
+  }
+
+  function tiles(view) {
+    const prompts = view.prompts
+    const tokens = sum(prompts, allTokens)
+    const usd = sum(prompts, allUsd)
+    const unattributed = sum(prompts, p => p.values.usd.unattributed)
+    const over = sum(prompts, p => p.overUsd)
+    const requests = sum(prompts, p => p.requests)
+    const largest = prompts.reduce((best, p) => (barTotal(p) > barTotal(best) ? p : best), prompts[0])
+    const input = sum(prompts, p => p.tokens.input + p.tokens.cacheRead + p.tokens.cacheWrite)
+    const read = sum(prompts, p => p.tokens.cacheRead)
+    const peak = prompts.reduce((best, p) => (p.contextPeak > best.contextPeak ? p : best), prompts[0])
+    const models = {}
+    for (const p of prompts) for (const [model, count] of Object.entries(p.models)) models[model] = (models[model] || 0) + num(count)
+    const ranked = Object.entries(models).sort((a, b) => b[1] - a[1])
+
+    const first = unitIsUsd()
+      ? tile('API list-price equivalent', fmtUsd(usd), (unattributed >= 0.0005 ? `incl. ${fmtUsd(unattributed)} unattributed · ` : '') + (over >= 0.0005 ? `priced ${fmtUsd(over)} above Claude Code's count · ` : '') + `${fmtTokens(tokens)} tokens`)
+      : tile('Tokens', fmtTokens(tokens), `≈ ${fmtUsd(usd)} API list-price equivalent`)
+
+    return h(
+      'section',
+      { class: 'tiles', id: 'tiles', 'aria-label': 'Totals' },
+      first,
+      tile('Prompts', fmtInt(prompts.length), plural(requests, 'model request')),
+      tile('Average per prompt', amount(sum(prompts, barTotal) / prompts.length), `${(requests / prompts.length).toFixed(1)} requests each`),
+      tile('Largest prompt', amount(barTotal(largest)), `${barName(view, largest)}${largest.label ? ' · ' + largest.label : ''} · ${plural(largest.requests, 'request')}`),
+      tile('Cache hit rate', fmtPct(read, input), `${fmtTokens(read)} of ${fmtTokens(input)} input tokens read from the cache`),
+      tile('Peak context', fmtTokens(peak.contextPeak), (peak.contextWindow ? `${fmtPct(peak.contextPeak, peak.contextWindow)} of ${fmtTokens(peak.contextWindow)} · ` : '') + `prompt ${barName(view, peak)}`),
+      tile('Model', ranked.length ? shortModel(ranked[0][0]) : '–', ranked.length > 1 ? ranked.slice(1, 4).map(([m, c]) => `${shortModel(m)} ×${c}`).join(' · ') : ranked.length ? plural(ranked[0][1], 'request') : ''),
+    )
+  }
+
+  const shortModel = model => String(model).replace(/^claude-/, '').replace(/-\d{8}$/, '')
+
+  // ---------------------------------------------------------------- insights
+
+  /**
+   * Plain-language findings, each computed from the rows and shown only
+   * when the rows support it. Nothing here is a guess about data the log
+   * does not hold.
+   */
+  function computeInsights(view) {
+    const prompts = view.prompts
+    const out = []
+    const tokens = sum(prompts, allTokens)
+    const usd = sum(prompts, allUsd)
+    const input = sum(prompts, p => p.tokens.input + p.tokens.cacheRead + p.tokens.cacheWrite)
+    const read = sum(prompts, p => p.tokens.cacheRead)
+    const peak = maxOf(prompts.map(p => p.contextPeak))
+
+    // A cold cache: requests that read none of it, after the session's first prompt.
+    const cold = prompts.filter(p => p.coldRequests > 0 && !(p.n === 1 && !view.isAll))
+    if (cold.length > 0) {
+      const recached = sum(cold, p => p.recachedTokens)
+      const recachedUsd = sum(cold, p => (p.tokens.cacheWrite > 0 ? p.values.usd.cacheWrite * Math.min(1, p.recachedTokens / p.tokens.cacheWrite) : 0))
+      const uses1h = prompts.some(p => p.write1h > 0)
+      const ttl = uses1h ? 3600000 : 300000
+      const afterPause = cold.filter(p => p.idleBeforeMs !== undefined && p.idleBeforeMs > ttl).length
+      let text = `The cache went cold ${plural(sum(cold, p => p.coldRequests), 'time')} (${cold.length === 1 ? 'prompt' : 'prompts'} ${cold.slice(0, 8).map(p => barName(view, p)).join(', ')}${cold.length > 8 ? ', …' : ''}). Writing the context to the cache again took ${fmtTokens(recached)} tokens`
+      text += usd > 0 && recachedUsd > 0 ? `, about ${fmtShare(recachedUsd, usd)} of this ${view.isAll ? 'history' : 'session'}'s API list-price equivalent.` : '.'
+      if (afterPause > 0) text += ` ${afterPause === cold.length ? (afterPause === 1 ? 'It' : 'All of them') : afterPause} came after a pause longer than the cache lasts (${uses1h ? '1 hour' : '5 minutes'}).`
+      out.push(text)
+    }
+
+    // Context re-sent with every request.
+    if (peak > 0 && input / peak >= 3) {
+      out.push(`Every model request re-sends the conversation: ${fmtTokens(input)} input tokens went through a context that peaked at ${fmtTokens(peak)}, about ${Math.round(input / peak)} times its size. Fewer tool round trips, or a fresh session for a new task, shrink this.`)
+    }
+
+    if (input > 0 && prompts.length >= 2) {
+      const share = read / input
+      if (share >= 0.8) out.push(`${fmtShare(read, input)} of input tokens were read from the cache, which is billed at a tenth of the uncached input rate.`)
+      else if (share < 0.5) out.push(`Only ${fmtShare(read, input)} of input tokens were read from the cache. Long pauses between prompts, or changes early in the context, make the cache miss.`)
+    }
+
+    // One prompt doing most of the work.
+    if (prompts.length >= 3 && tokens > 0) {
+      const top = prompts.reduce((best, p) => (allTokens(p) > allTokens(best) ? p : best), prompts[0])
+      if (allTokens(top) / tokens >= 0.25) {
+        out.push(`Prompt ${barName(view, top)}${top.label ? ` (“${top.label}”)` : ''} used ${fmtShare(allTokens(top), tokens)} of the tokens: ${plural(top.requests, 'request')}, each re-sending up to ${fmtTokens(top.contextPeak)} of context.`)
+      }
+    }
+
+    // Tool results read back into the context.
+    const tools = toolTotals(prompts)
+    if (tools.length > 0 && peak > 0 && tools[0].tokens >= Math.max(5000, peak * 0.1)) {
+      const t = tools[0]
+      out.push(`${t.name} results put about ${fmtTokens(t.tokens)} tokens into the context (estimated from ${fmtInt(t.chars)} characters across ${plural(t.calls, 'call')}). Narrower commands and reads keep it smaller.`)
+    }
+
+    // Preloaded context, from the first snapshot.
+    const before = view.contexts.find(c => c.n === 0) || view.contexts[0]
+    if (before && before.preloaded > 0) {
+      const used = before.categories.filter(c => c.kind === 'used' && c.name !== 'Messages').sort((a, b) => b.tokens - a.tokens)
+      const of = before.window ? ` (${fmtPct(before.preloaded, before.window)} of the ${fmtTokens(before.window)} window)` : ''
+      out.push(`Before the first prompt, ${fmtTokens(before.preloaded)} tokens${of} were already in the context: ${used.slice(0, 3).map(c => `${c.name} ${fmtTokens(c.tokens)}`).join(', ')}. Every request re-sends them.`)
+    }
+
+    // Subagents.
+    const agentTokens = sum(prompts, p => tokenTotal(p.agentTokens))
+    if (tokens > 0 && agentTokens / tokens >= 0.1) {
+      const count = sum(prompts, p => (p.agents ? num(p.agents.agentCount) : 0))
+      out.push(`Subagents used ${fmtShare(agentTokens, tokens)} of the tokens (${plural(count, 'agent')}). Each has its own context, so its work does not fill yours.`)
+    }
+
+    // Thinking.
+    const output = sum(prompts, p => p.tokens.reasoning + p.tokens.answer)
+    const thinking = sum(prompts, p => p.tokens.reasoning)
+    if (output > 0 && thinking / output >= 0.5) {
+      out.push(`Thinking made ${fmtShare(thinking, output)} of the output tokens. A lower effort level trims it for routine work.`)
+    }
+
+    // Compaction.
+    if (view.compacts.length > 0) {
+      const shrunk = view.compacts.filter(c => c.before > 0 && c.after > 0)
+      out.push(`The context was compacted ${plural(view.compacts.length, 'time')}${shrunk.length ? `, from ${fmtTokens(sum(shrunk, c => c.before) / shrunk.length)} to ${fmtTokens(sum(shrunk, c => c.after) / shrunk.length)} on average` : ''}.`)
+    }
+
+    return out
+  }
+
+  function insightsCard(view) {
+    const items = computeInsights(view)
+    if (items.length === 0) return null
+    return h('section', { class: 'card', id: 'insights' }, h('h2', { text: 'What stands out' }), h('ul', { class: 'insights' }, items.map(text => h('li', { text }))))
+  }
+
+  // ---------------------------------------------------------------- tooltip
+
+  const tip = () => document.getElementById('tip')
+
+  /** Shows `lines` beside `rect`: a head line, then [name, value] rows. */
+  function showTip(rect, head, rows) {
+    const box = tip()
+    box.textContent = ''
+    box.append(h('div', { class: 'head', text: head }))
+    for (const [name, value] of rows) box.append(h('div', { class: 'row' }, h('span', { text: name }), h('span', { text: value })))
+    box.hidden = false
+    const width = box.offsetWidth
+    const height = box.offsetHeight
+    let left = rect.right + 8
+    if (left + width > window.innerWidth - 8) left = Math.max(8, rect.left - width - 8)
+    let top = rect.top + rect.height / 2 - height / 2
+    top = Math.min(Math.max(8, top), window.innerHeight - height - 8)
+    box.style.left = left + 'px'
+    box.style.top = top + 'px'
+    document.getElementById('live').textContent = head + '. ' + rows.map(row => row.join(' ')).join(', ')
+  }
+
+  function hideTip() {
+    const box = tip()
+    if (box) box.hidden = true
+  }
+
+  /**
+   * One tab stop per chart: arrows move between its items, Home and End
+   * jump, Escape closes the tooltip. Hovering does the same with a mouse.
+   */
+  function interact(chart, count, xOf, show, scroller) {
+    let active = count - 1
+    const go = i => {
+      active = Math.max(0, Math.min(count - 1, i))
+      show(active)
+      if (scroller) {
+        const x = xOf(active)
+        if (x < scroller.scrollLeft + 40 || x > scroller.scrollLeft + scroller.clientWidth - 40) scroller.scrollLeft = x - scroller.clientWidth / 2
+      }
+    }
+    chart.addEventListener('keydown', event => {
+      const moves = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }
+      if (event.key in moves) go(active + moves[event.key])
+      else if (event.key === 'Home') go(0)
+      else if (event.key === 'End') go(count - 1)
+      else if (event.key === 'PageUp') go(active - 10)
+      else if (event.key === 'PageDown') go(active + 10)
+      else if (event.key === 'Escape') hideTip()
+      else return
+      event.preventDefault()
+    })
+    chart.addEventListener('focus', () => go(active))
+    chart.addEventListener('blur', hideTip)
+    chart.addEventListener('mouseleave', hideTip)
+    chart.addEventListener('mousemove', event => {
+      const box = chart.getBoundingClientRect()
+      const x = event.clientX - box.left
+      let best = 0
+      let distance = Infinity
+      for (let i = 0; i < count; i += 1) {
+        const d = Math.abs(xOf(i) - x)
+        if (d < distance) {
+          distance = d
+          best = i
+        }
+      }
+      active = best
+      show(best)
+    })
+  }
+
+  // ---------------------------------------------------------------- charts
+
+  const PAD = { left: 52, right: 10, top: 10, bottom: 22 }
+
+  function gridLines(group, max, height, width, format) {
+    for (const share of [0, 0.5, 1]) {
+      const y = PAD.top + (1 - share) * (height - PAD.top - PAD.bottom)
+      group.append(svg('line', { class: share === 0 ? 'axis' : 'grid', x1: PAD.left, x2: width - PAD.right, y1: y, y2: y }))
+      group.append(svg('text', { x: PAD.left - 6, y: y + 4, 'text-anchor': 'end', text: format(max * share) }))
+    }
+  }
+
+  /**
+   * Stacked columns. `bars` are { name, values: {key: n}, head, rows }; `keys`
+   * are the parts drawn, bottom first. Scrolls sideways when the columns
+   * would be too thin.
+   */
+  function columnChart(opts) {
+    const { bars, keys, label, format } = opts
+    const height = opts.height || 240
+    const totals = bars.map(bar => keys.reduce((total, key) => total + num(bar.values[key]), 0))
+    const max = opts.max || maxOf(totals) || 1
+    const step = Math.max(opts.minStep || 14, Math.min(56, (opts.width - PAD.left - PAD.right) / Math.max(1, bars.length)))
+    const width = Math.max(opts.width, PAD.left + PAD.right + step * bars.length)
+    const plot = height - PAD.top - PAD.bottom
+    const barWidth = Math.max(3, step * 0.7)
+    const xOf = i => PAD.left + step * i + step / 2
+
+    const chart = svg('svg', { class: 'chart', width, height, viewBox: `0 0 ${width} ${height}`, role: 'group', 'aria-roledescription': 'chart', 'aria-label': label + '. Use the arrow keys to read each column.', tabindex: 0 })
+    const grid = svg('g', { 'aria-hidden': 'true' })
+    gridLines(grid, max, height, width, format)
+    chart.append(grid)
+
+    const columns = svg('g', { 'aria-hidden': 'true' })
+    const labelEvery = Math.max(1, Math.ceil(44 / step))
+    bars.forEach((bar, i) => {
+      let y = PAD.top + plot
+      for (const key of keys) {
+        const value = num(bar.values[key])
+        if (value <= 0) continue
+        const h2 = (value / max) * plot
+        y -= h2
+        columns.append(svg('rect', { x: xOf(i) - barWidth / 2, y, width: barWidth, height: Math.max(0.5, h2), fill: opts.colorOf ? opts.colorOf(key, bar) : color(key) }))
+      }
+      // Every few columns, and the last where it has room beside the one before.
+      const isLast = i === bars.length - 1
+      if (i % labelEvery === 0 || (isLast && (i % labelEvery) * step >= 44)) columns.append(svg('text', { x: xOf(i), y: height - 6, 'text-anchor': 'middle', text: bar.name }))
+    })
+    chart.append(columns)
+
+    const marker = svg('rect', { class: 'active', x: 0, y: PAD.top, width: step, height: plot, visibility: 'hidden', rx: 3 })
+    chart.append(marker)
+
+    const scroller = h('div', { class: 'scroll' }, chart)
+    interact(chart, bars.length, xOf, i => {
+      marker.setAttribute('x', xOf(i) - step / 2)
+      marker.setAttribute('width', step)
+      marker.setAttribute('visibility', 'visible')
+      const box = chart.getBoundingClientRect()
+      showTip({ left: box.left + xOf(i) - step / 2, right: box.left + xOf(i) + step / 2, top: box.top + PAD.top, height: plot }, bars[i].head, bars[i].rows())
+    }, scroller)
+    chart.addEventListener('mouseleave', () => marker.setAttribute('visibility', 'hidden'))
+    chart.addEventListener('blur', () => marker.setAttribute('visibility', 'hidden'))
+    return scroller
+  }
+
+  /** Buttons that switch parts on and off in every chart that draws them. */
+  function legend(parts, onChange) {
+    return h(
+      'div',
+      { class: 'legend', role: 'group', 'aria-label': 'Parts shown' },
+      parts.map(part =>
+        h(
+          'button',
+          {
+            type: 'button',
+            'aria-pressed': state.hidden.has(part.key) ? 'false' : 'true',
+            onclick: event => {
+              if (state.hidden.has(part.key)) state.hidden.delete(part.key)
+              else state.hidden.add(part.key)
+              event.currentTarget.setAttribute('aria-pressed', state.hidden.has(part.key) ? 'false' : 'true')
+              onChange()
+            },
+          },
+          h('span', { class: 'swatch', style: { background: color(part.key) } }),
+          part.label,
+        ),
+      ),
+    )
+  }
+
+  function card(id, title, lede, ...content) {
+    return h('section', { class: 'card', id }, h('h2', { text: title }), lede ? h('p', { class: 'lede', text: lede }) : null, content)
+  }
+
+  /** The rows of a prompt's tooltip. */
+  function promptRows(p, values) {
+    const rows = partsShown()
+      .filter(part => num(values[part.key]) > 0)
+      .reverse()
+      .map(part => [part.label, unitIsUsd() ? fmtUsdExact(values[part.key]) : fmtInt(values[part.key])])
+    rows.push(['Requests', fmtInt(p.requests)])
+    if (p.contextAfter !== undefined || p.contextEnd) rows.push(['Context after', fmtTokens(p.contextAfter !== undefined ? p.contextAfter : p.contextEnd) + (p.contextWindow ? ` (${fmtPct(p.contextAfter !== undefined ? p.contextAfter : p.contextEnd, p.contextWindow)})` : '')])
+    rows.push(['Time', fmtTime(p.at)])
+    return rows
+  }
+
+  function promptsCard(view, width) {
+    const holder = h('div')
+    const draw = () => {
+      holder.textContent = ''
+      const keys = partsShown().map(part => part.key).filter(key => !state.hidden.has(key))
+      holder.append(
+        columnChart({
+          label: unitIsUsd() ? 'API list-price equivalent per prompt' : 'Tokens per prompt',
+          width,
+          keys,
+          format: amount,
+          bars: view.prompts.map(p => ({
+            name: barName(view, p),
+            values: valuesOf(p),
+            head: `Prompt ${barName(view, p)}${p.label ? ' · ' + p.label : ''}: ${amount(barTotal(p))}`,
+            rows: () => promptRows(p, valuesOf(p)),
+          })),
+        }),
+      )
+    }
+    draw()
+    return card(
+      'chart-prompts',
+      unitIsUsd() ? 'API list-price equivalent per prompt' : 'Tokens per prompt',
+      'Each column adds up every model request the prompt took. Each request re-sends the whole context, so a prompt with many tool calls can process many times the context’s size.',
+      legend(partsShown(), draw),
+      holder,
+    )
+  }
+
+  function growthCard(view, width) {
+    const running = {}
+    const bars = view.prompts.map(p => {
+      const values = valuesOf(p)
+      for (const part of PARTS) running[part.key] = num(running[part.key]) + num(values[part.key])
+      const snapshot = { ...running }
+      const total = PARTS.reduce((t, part) => t + num(snapshot[part.key]), 0)
+      return {
+        name: barName(view, p),
+        values: snapshot,
+        head: `Up to prompt ${barName(view, p)}: ${amount(total)}`,
+        rows: () => partsShown().filter(part => snapshot[part.key] > 0).reverse().map(part => [part.label, amount(snapshot[part.key])]),
+      }
+    })
+    const keys = partsShown().map(part => part.key).filter(key => !state.hidden.has(key))
+    return card('chart-growth', unitIsUsd() ? 'Running total, API list-price equivalent' : 'Running total of tokens', 'How the total grows prompt by prompt, by part.', columnChart({ label: 'Running total', width, keys, format: amount, bars, height: 200 }))
+  }
+
+  function multiplesCard(view) {
+    const panels = partsShown()
+      .map(part => {
+        const total = sum(view.prompts, p => valuesOf(p)[part.key])
+        if (total <= 0) return null
+        return h(
+          'div',
+          {},
+          h('h3', {}, h('span', { class: 'swatch', style: { background: color(part.key) } }), ` ${part.label} · ${amount(total)}`),
+          columnChart({
+            label: `${part.label} per prompt, on its own scale`,
+            width: 250,
+            height: 120,
+            minStep: 4,
+            keys: [part.key],
+            format: amount,
+            bars: view.prompts.map(p => ({
+              name: barName(view, p),
+              values: valuesOf(p),
+              head: `Prompt ${barName(view, p)}: ${part.label}`,
+              rows: () => [[part.label, unitIsUsd() ? fmtUsdExact(valuesOf(p)[part.key]) : fmtInt(valuesOf(p)[part.key])]],
+            })),
+          }),
+        )
+      })
+      .filter(Boolean)
+    return card('chart-multiples', 'Each part on its own scale', 'Small parts such as uncached input disappear beside cache reads; here each has its own scale.', h('div', { class: 'multiples' }, panels))
+  }
+
+  // ---------------------------------------------------------------- context
+
+  /** Every request's context size, across prompts, at most `limit` points (the largest of each run kept). */
+  function contextPoints(view, limit) {
+    const points = []
+    for (const p of view.prompts) {
+      const steps = p.contextByStep
+      const first = Math.max(0, p.requests - steps.length)
+      const detailFirst = p.detail.length ? p.detail[0].k : Infinity
+      for (let i = 0; i < steps.length; i += 1) {
+        const k = first + i + 1
+        points.push({ p, k, value: num(steps[i]), detail: k >= detailFirst ? p.detail[k - detailFirst] : undefined })
+      }
+    }
+    if (points.length <= limit) return points
+    const bucket = Math.ceil(points.length / limit)
+    const kept = []
+    for (let start = 0; start < points.length; start += bucket) {
+      let best = points[start]
+      for (let i = start + 1; i < Math.min(points.length, start + bucket); i += 1) if (points[i].value > best.value) best = points[i]
+      kept.push(best)
+    }
+    return kept
+  }
+
+  function contextCard(view, width) {
+    const points = contextPoints(view, 3000)
+    if (points.length === 0) return null
+    const height = 240
+    const windowSize = maxOf(view.prompts.map(p => p.contextWindow))
+    const peak = maxOf(points.map(point => point.value))
+    const max = Math.max(1, peak * 1.1)
+    const step = Math.max(3, Math.min(30, (width - PAD.left - PAD.right) / Math.max(1, points.length)))
+    const chartWidth = Math.max(width, PAD.left + PAD.right + step * points.length)
+    const plot = height - PAD.top - PAD.bottom
+    const xOf = i => PAD.left + step * i + step / 2
+    const yOf = value => PAD.top + plot - (value / max) * plot
+
+    const chart = svg('svg', { class: 'chart', width: chartWidth, height, viewBox: `0 0 ${chartWidth} ${height}`, role: 'group', 'aria-roledescription': 'chart', 'aria-label': 'Context size at each model request. Use the arrow keys to read each request.', tabindex: 0 })
+    const back = svg('g', { 'aria-hidden': 'true' })
+    gridLines(back, max, height, chartWidth, fmtTokens)
+    let line = ''
+    points.forEach((point, i) => {
+      line += (i === 0 ? 'M' : 'L') + xOf(i).toFixed(1) + ' ' + yOf(point.value).toFixed(1)
+    })
+    const area = `${line}L${xOf(points.length - 1).toFixed(1)} ${PAD.top + plot}L${xOf(0).toFixed(1)} ${PAD.top + plot}Z`
+    back.append(svg('path', { d: area, fill: 'var(--c-context)', 'fill-opacity': 0.15 }))
+    back.append(svg('path', { d: line, fill: 'none', stroke: 'var(--c-context)', 'stroke-width': 1.5 }))
+    // Where a prompt starts, and where the context was compacted.
+    let last = null
+    const labelEvery = Math.max(1, Math.ceil(points.length / Math.max(1, chartWidth / 60)))
+    points.forEach((point, i) => {
+      if (point.p !== last) {
+        if (i % labelEvery === 0) back.append(svg('text', { x: xOf(i), y: height - 6, 'text-anchor': 'middle', text: barName(view, point.p) }))
+        last = point.p
+      }
+    })
+    for (const compact of view.compacts) {
+      const i = points.findIndex(point => point.p.at >= compact.at)
+      if (i > 0) back.append(svg('line', { x1: xOf(i) - step / 2, x2: xOf(i) - step / 2, y1: PAD.top, y2: PAD.top + plot, stroke: 'var(--c-window)', 'stroke-dasharray': '3 3' }))
+    }
+    chart.append(back)
+    const dot = svg('circle', { r: 4, fill: 'var(--c-context)', stroke: 'var(--card)', 'stroke-width': 2, visibility: 'hidden' })
+    chart.append(dot)
+
+    const scroller = h('div', { class: 'scroll' }, chart)
+    interact(chart, points.length, xOf, i => {
+      const point = points[i]
+      dot.setAttribute('cx', xOf(i))
+      dot.setAttribute('cy', yOf(point.value))
+      dot.setAttribute('visibility', 'visible')
+      const box = chart.getBoundingClientRect()
+      const rows = [['Context', fmtInt(point.value) + (point.p.contextWindow ? ` (${fmtPct(point.value, point.p.contextWindow)})` : '')]]
+      const d = point.detail
+      if (d) {
+        const write5m = num(d.cacheWrite5mTokens)
+        const write = num(d.cacheCreationTokens)
+        rows.push(['Cache read', fmtInt(d.cacheReadTokens)])
+        rows.push(['Cache write', fmtInt(write) + (write > 0 ? ` (5m ${fmtTokens(write5m)} · 1h ${fmtTokens(Math.max(0, write - write5m))})` : '')])
+        rows.push(['Uncached input', fmtInt(d.inputTokens)])
+        rows.push(['Output', fmtInt(d.outputTokens)])
+        rows.push([num(d.isReasoningReported) ? 'Thinking' : 'Thinking (est.)', fmtInt(d.reasoningTokens)])
+        rows.push(['Tool calls', fmtInt(d.toolUses)])
+        rows.push(['Time', fmtDuration(d.durationMs)])
+        rows.push(['API list-price equivalent', fmtUsdExact(d.costUsd)])
+      }
+      showTip({ left: box.left + xOf(i) - 4, right: box.left + xOf(i) + 4, top: box.top + yOf(point.value) - 4, height: 8 }, `Prompt ${barName(view, point.p)} · request ${point.k} of ${point.p.requests}`, rows)
+    }, scroller)
+    chart.addEventListener('mouseleave', () => dot.setAttribute('visibility', 'hidden'))
+
+    const lede = `The context sent with each model request. It grows as the conversation does and drops when it is compacted (dashed lines).` + (windowSize ? ` The window holds ${fmtTokens(windowSize)}; the peak here is ${fmtTokens(peak)} (${fmtPct(peak, windowSize)}).` : ` The peak here is ${fmtTokens(peak)}.`)
+    return card('chart-context', 'Context size per request', lede, scroller)
+  }
+
+  function hbars(rows, colorOf, caption) {
+    const max = maxOf(rows.map(row => row.value)) || 1
+    return h(
+      'table',
+      { class: 'hbars' },
+      h('caption', { class: 'visually-hidden', text: caption }),
+      h(
+        'tbody',
+        {},
+        rows.map(row =>
+          h(
+            'tr',
+            {},
+            h('th', { scope: 'row', title: row.name, text: row.name }),
+            h('td', { class: 'bar' }, h('div', { class: 'fill', style: { width: (row.value / max) * 100 + '%', background: colorOf(row) } })),
+            h('td', { class: 'num', text: row.note }),
+          ),
+        ),
+      ),
+    )
+  }
+
+  function snapshotLabel(view, snapshot, i) {
+    const previous = view.contexts[i - 1]
+    const isAfterCompact = view.compacts.some(c => c.session === snapshot.session && c.at <= snapshot.at && (!previous || previous.session !== snapshot.session || c.at > previous.at))
+    const prefix = view.isAll ? `S${view.order.get(snapshot.session)} · ` : ''
+    if (snapshot.n === 0) return prefix + 'Before the first prompt'
+    return prefix + (isAfterCompact ? `After compaction (prompt ${snapshot.n})` : `After prompt ${snapshot.n}`)
+  }
+
+  function windowCard(view) {
+    if (view.contexts.length === 0) return null
+    const holder = h('div')
+    const picker = h('select', { id: 'snapshot', 'aria-label': 'Snapshot' })
+    view.contexts.forEach((snapshot, i) => picker.append(h('option', { value: i, text: snapshotLabel(view, snapshot, i) })))
+    const chosen = state.snapshot !== null && state.snapshot < view.contexts.length ? state.snapshot : view.contexts.length - 1
+    picker.value = String(chosen)
+    const draw = () => {
+      holder.textContent = ''
+      const snapshot = view.contexts[Number(picker.value)]
+      state.snapshot = Number(picker.value)
+      const whole = snapshot.window || snapshot.max || snapshot.total
+      const rows = snapshot.categories
+        .filter(c => c.tokens > 0)
+        .sort((a, b) => (a.kind === 'used') === (b.kind === 'used') ? b.tokens - a.tokens : a.kind === 'used' ? -1 : 1)
+        .map(c => ({ name: c.name, value: c.tokens, kind: c.kind, note: `${fmtTokens(c.tokens)}${whole ? ' · ' + fmtPct(c.tokens, whole) : ''}` }))
+      holder.append(hbars(rows, row => (row.kind === 'used' ? (row.name === 'Messages' ? 'var(--c-answer)' : 'var(--c-cacheRead)') : 'var(--grid)'), 'Context window by category'))
+      const notes = []
+      notes.push(snapshot.window ? `Window ${fmtTokens(snapshot.window)}; ${fmtTokens(snapshot.total)} in use (${fmtPct(snapshot.total, snapshot.window)}).` : `${fmtTokens(snapshot.total)} in use; the window size was not recorded.`)
+      if (snapshot.preloaded > 0) notes.push(`Preloaded before you type (everything but the messages): ${fmtTokens(snapshot.preloaded)}${snapshot.window ? `, ${fmtPct(snapshot.preloaded, snapshot.window)} of the window` : ''}.`)
+      holder.append(h('p', { class: 'lede', id: 'preloaded-note', text: notes.join(' ') }))
+    }
+    picker.addEventListener('change', draw)
+    draw()
+    return card('chart-window', 'What fills the context window', 'Snapshots taken before the first prompt, after the first, every tenth, and after each compaction, as /context counts them.', h('p', {}, picker), holder)
+  }
+
+  // ---------------------------------------------------------------- tools, agents, cache
+
+  function toolTotals(prompts) {
+    const tools = new Map()
+    for (const p of prompts) {
+      for (const [name, stat] of Object.entries(p.tools)) {
+        const t = tools.get(name) || { name, calls: 0, chars: 0, errors: 0 }
+        t.calls += num(stat && stat.calls)
+        t.chars += num(stat && stat.resultChars)
+        t.errors += num(stat && stat.errors)
+        tools.set(name, t)
+      }
+    }
+    return [...tools.values()].map(t => ({ ...t, tokens: Math.round(t.chars / 4) })).sort((a, b) => b.tokens - a.tokens || b.calls - a.calls)
+  }
+
+  function toolsCard(view) {
+    const tools = toolTotals(view.prompts)
+    if (tools.length === 0) return null
+    const rows = tools.slice(0, 30).map(t => ({ name: t.name, value: t.tokens, note: `≈${fmtTokens(t.tokens)} tok · ${plural(t.calls, 'call')}${t.errors ? ` · ${plural(t.errors, 'error')}` : ''}` }))
+    return card('chart-tools', 'Tool results in the context', 'What each tool’s results added to the context, estimated at four characters a token. Only sizes are recorded, never contents.', hbars(rows, () => 'var(--c-cacheWrite)', 'Tool results by tool'))
+  }
+
+  function agentsCard(view) {
+    const rows = []
+    for (const p of view.prompts) {
+      if (!p.agents || !Array.isArray(p.agents.agents)) continue
+      for (const agent of p.agents.agents) {
+        if (!agent || typeof agent !== 'object') continue
+        const tokens = partsOf(agent.tokens)
+        const input = tokens.input + tokens.cacheRead + tokens.cacheWrite
+        const calls = Object.values(agent.tools || {}).reduce((total, stat) => total + num(stat && stat.calls), 0)
+        rows.push([
+          barName(view, p),
+          String(agent.type || 'agent'),
+          String(agent.description || ''),
+          fmtInt(agent.runs),
+          fmtInt(agent.requests),
+          fmtTokens(num(agent.totalTokens) || tokenTotal(tokens)),
+          fmtPct(tokens.cacheRead, input),
+          fmtTokens(tokens.reasoning),
+          fmtInt(calls),
+          fmtUsd(agent.estCostUsd),
+        ])
+      }
+    }
+    if (rows.length === 0) return null
+    const head = ['Prompt', 'Type', 'Description', 'Runs', 'Requests', 'Tokens', 'Cache hit', 'Thinking', 'Tool calls', '$ (est.)']
+    return card('chart-agents', 'Subagents', 'Each subagent works in its own context; its tokens are counted with the prompt that started it.', h('div', { class: 'table-wrap' }, dataTable(head, rows, [1, 2])))
+  }
+
+  function hitCard(view, width) {
+    const bars = view.prompts.map(p => {
+      const input = p.tokens.input + p.tokens.cacheRead + p.tokens.cacheWrite
+      const hit = input > 0 ? (p.tokens.cacheRead / input) * 100 : 0
+      return {
+        name: barName(view, p),
+        values: { hit },
+        head: `Prompt ${barName(view, p)}: ${fmtPct(p.tokens.cacheRead, input)} from the cache`,
+        rows: () => [
+          ['Cache read', fmtInt(p.tokens.cacheRead)],
+          ['Written to the cache', fmtInt(p.tokens.cacheWrite)],
+          ['Uncached input', fmtInt(p.tokens.input)],
+          ['Requests that read no cache', fmtInt(p.coldRequests)],
+        ],
+      }
+    })
+    return card('chart-hit', 'Cache hit rate per prompt', 'The share of each prompt’s input read from the cache. A dip means the cache had gone cold and the context was written again.', columnChart({ label: 'Cache hit rate per prompt', width, height: 160, keys: ['hit'], max: 100, format: v => Math.round(v) + '%', colorOf: () => 'var(--c-hit)', bars }))
+  }
+
+  // ---------------------------------------------------------------- tables
+
+  function dataTable(head, rows, textColumns) {
+    return h(
+      'table',
+      { class: 'data' },
+      h('thead', {}, h('tr', {}, head.map((name, i) => h('th', { scope: 'col', class: textColumns.includes(i) ? 'text' : undefined, text: name })))),
+      h('tbody', {}, rows.map(row => h('tr', {}, row.map((cell, i) => h('td', { class: textColumns.includes(i) ? 'text' : undefined, title: textColumns.includes(i) && typeof cell === 'string' ? cell : undefined }, cell))))),
+    )
+  }
+
+  /** A collapsed table, built the first time it is opened. */
+  function lazyTable(id, title, build) {
+    const holder = h('div', { class: 'table-wrap' })
+    const details = h('details', { id }, h('summary', { text: title }), holder)
+    details.addEventListener('toggle', () => {
+      if (details.open && holder.childElementCount === 0) holder.append(build())
+    })
+    return h('section', { class: 'card' }, details)
+  }
+
+  function promptTableCard(view) {
+    return lazyTable('table-prompts', 'Every prompt', () => {
+      const head = [...(view.isAll ? ['Session'] : []), '#', 'Time', 'Prompt', 'Model', 'Effort', 'Reqs', 'Idle before (s)', 'Input', 'Cache read', 'Cache write', 'Output', 'Thinking', 'Context end', 'Context peak', 'Tool result tok (est.)', '$ input', '$ cache read', '$ cache write', '$ thinking', '$ answer', '$ subagents (est.)', '$ unattributed', '$ total', 'Cache hit']
+      const rows = view.prompts.map(p => {
+        const usd = p.values.usd
+        const input = p.tokens.input + p.tokens.cacheRead + p.tokens.cacheWrite
+        return [
+          ...(view.isAll ? [sessionName(p.session)] : []),
+          barName(view, p),
+          fmtTime(p.at),
+          p.label || p.prompt || '',
+          shortModel(p.model),
+          p.effort,
+          fmtInt(p.requests),
+          p.idleBeforeMs === undefined ? '' : fmtInt(p.idleBeforeMs / 1000),
+          fmtInt(p.tokens.input),
+          fmtInt(p.tokens.cacheRead),
+          fmtInt(p.tokens.cacheWrite),
+          fmtInt(p.tokens.reasoning + p.tokens.answer),
+          fmtInt(p.tokens.reasoning) + (p.reasoningMethod && p.reasoningMethod !== 'reported' ? ' (est.)' : ''),
+          fmtInt(p.contextAfter !== undefined ? p.contextAfter : p.contextEnd),
+          fmtInt(p.contextPeak),
+          fmtInt(p.toolResultTokens),
+          fmtUsdExact(usd.input),
+          fmtUsdExact(usd.cacheRead),
+          fmtUsdExact(usd.cacheWrite),
+          fmtUsdExact(usd.reasoning),
+          fmtUsdExact(usd.answer),
+          fmtUsdExact(usd.subagents),
+          fmtUsdExact(usd.unattributed),
+          fmtUsdExact(allUsd(p)),
+          fmtPct(p.tokens.cacheRead, input),
+        ]
+      })
+      return dataTable(head, rows, view.isAll ? [0, 3] : [2])
+    })
+  }
+
+  function requestTableCard(view) {
+    return lazyTable('table-requests', 'Every model request', () => {
+      const head = ['Prompt', 'Request', 'Model', 'Input', 'Cache read', 'Cache write', '5m / 1h', 'Cache hit', 'Output', 'Thinking', 'Tool calls', 'Time', '$']
+      const rows = []
+      for (const p of view.prompts) {
+        for (const d of p.detail) {
+          const write = num(d.cacheCreationTokens)
+          const write5m = num(d.cacheWrite5mTokens)
+          const input = num(d.inputTokens) + num(d.cacheReadTokens) + write
+          const tags = [num(d.isFast) ? h('span', { class: 'tag', text: 'fast' }) : null, num(d.isUsOnly) ? h('span', { class: 'tag', text: 'US-only' }) : null]
+          rows.push([
+            barName(view, p),
+            `${d.k} of ${fmtInt(p.requests)}`,
+            h('span', {}, shortModel(d.model), tags),
+            fmtInt(d.inputTokens),
+            fmtInt(d.cacheReadTokens),
+            fmtInt(write),
+            write > 0 ? `${fmtTokens(write5m)} / ${fmtTokens(Math.max(0, write - write5m))}` : '',
+            fmtPct(d.cacheReadTokens, input),
+            fmtInt(d.outputTokens),
+            fmtInt(d.reasoningTokens) + (num(d.isReasoningReported) ? '' : ' (est.)'),
+            fmtInt(d.toolUses),
+            fmtDuration(d.durationMs),
+            fmtUsdExact(d.costUsd),
+          ])
+        }
+      }
+      if (rows.length === 0) return h('p', { class: 'muted', text: 'No per-request detail was recorded.' })
+      return dataTable(head, rows, [2])
+    })
+  }
+
+  // ---------------------------------------------------------------- notes
+
+  function notesCard(view) {
+    const prompts = view.prompts
+    const notes = []
+    const prices = window.TUA_PRICES && typeof window.TUA_PRICES === 'object' ? window.TUA_PRICES : undefined
+    const asOf = [...new Set(prompts.map(p => p.pricesAsOf).filter(Boolean))]
+
+    notes.push(`Dollar figures are an API list-price equivalent: what these tokens would cost at Anthropic’s published API prices${asOf.length ? ` (as of ${asOf.join(', ')})` : prices && prices.asOf ? ` (as of ${prices.asOf})` : ''}. On a subscription you are not billed per token.`)
+    notes.push('Token counts come from Claude Code’s session transcript, request by request. A prompt’s tokens add up every model request it made, and each request re-sends the context, so totals are far larger than the context itself.')
+
+    const methods = {}
+    for (const p of prompts) if (p.reasoningMethod) methods[p.reasoningMethod] = (methods[p.reasoningMethod] || 0) + 1
+    const methodText = { reported: 'reported by the API', proportional: 'estimated from the share of thinking text in the output', residual: 'estimated as the output left after the visible answer and tool calls', mixed: 'a mix of reported and estimated' }
+    const methodList = Object.entries(methods).map(([method, count]) => `${plural(count, 'prompt')} ${methodText[method] || method}`)
+    if (methodList.length) notes.push(`Thinking tokens: ${methodList.join('; ')}.`)
+
+    const unattributed = sum(prompts, p => p.values.usd.unattributed)
+    const over = sum(prompts, p => p.overUsd)
+    if (unattributed >= 0.0005) notes.push(`Unattributed (${fmtUsd(unattributed)}): Claude Code’s own cost count grew by more than the requests priced here, for example from background calls that leave no transcript entry. It is shown, not hidden.`)
+    if (over >= 0.0005) notes.push(`On some prompts the requests priced here came to ${fmtUsd(over)} more than Claude Code’s own count.`)
+
+    const fast = sum(prompts, p => p.fastRequests)
+    const usOnly = sum(prompts, p => p.usOnlyRequests)
+    if (fast > 0 || usOnly > 0) {
+      let text = `${plural(fast, 'request')} ran in fast mode and ${plural(usOnly, 'request')} with US-only inference, each priced at its own rates.`
+      const fastRates = prices && Array.isArray(prices.models) ? prices.models.filter(m => m && m.fast).map(m => `${m.name} $${m.fast.input} in / $${m.fast.output} out`) : []
+      if (fastRates.length) text += ` Fast mode rates per million tokens: ${fastRates.join('; ')}; cache prices scale with them.`
+      if (usOnly > 0 && prices && prices.usOnlyMultiplier) text += ` US-only inference costs ${prices.usOnlyMultiplier}× every rate.`
+      notes.push(text)
+    }
+
+    if (prompts.some(p => p.agents)) notes.push('Subagent figures come from their own transcripts and are estimates where a subagent was still running when its prompt ended.')
+    if (prompts.some(p => p.toolResultTokens > 0)) notes.push('Tool result tokens are estimated from result sizes at four characters a token.')
+    if (!prompts.some(p => p.label || p.prompt)) notes.push('Prompt text is not recorded (includePromptText is off), so prompts are shown by number.')
+
+    const newer = sum(view.sessions, s => s.newerRows)
+    if (newer > 0) notes.push(`${plural(newer, 'row')} written by a newer version of the mod ${newer === 1 ? 'was' : 'were'} skipped; update the viewer by starting a session with the newer mod.`)
+    const bad = sum(view.sessions, s => s.badLines)
+    if (bad > 0) notes.push(`${plural(bad, 'line')} could not be read and ${bad === 1 ? 'was' : 'were'} skipped.`)
+    const missing = view.sessions.flatMap(s => s.missing)
+    if (missing.length) notes.push(`Missing data ${missing.length === 1 ? 'file' : 'files'}: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''}.`)
+
+    return h('section', { class: 'card notes', id: 'notes' }, h('h2', { text: 'Notes' }), h('ul', {}, notes.map(text => h('li', { text }))))
+  }
+
+  // ---------------------------------------------------------------- controls
+
+  function applyTheme() {
+    document.documentElement.setAttribute('data-theme', state.theme)
+    document.getElementById('theme').textContent = 'Theme: ' + state.theme
+  }
+
+  function applyUnit() {
+    document.getElementById('unit-tokens').setAttribute('aria-pressed', String(state.unit === 'tokens'))
+    document.getElementById('unit-usd').setAttribute('aria-pressed', String(state.unit === 'usd'))
+  }
+
+  function setUnit(unit) {
+    state.unit = unit
+    keep('tua-unit', unit)
+    applyUnit()
+    if (state.current) render()
+  }
+
+  function start() {
+    applyTheme()
+    applyUnit()
+    readIndex()
+    drain()
+    fillPicker()
+
+    document.getElementById('session').addEventListener('change', event => choose(event.target.value))
+    document.getElementById('unit-tokens').addEventListener('click', () => setUnit('tokens'))
+    document.getElementById('unit-usd').addEventListener('click', () => setUnit('usd'))
+    document.getElementById('reload').addEventListener('click', () => location.reload())
+    document.getElementById('theme').addEventListener('click', () => {
+      const order = ['auto', 'light', 'dark']
+      state.theme = order[(order.indexOf(state.theme) + 1) % order.length]
+      keep('tua-theme', state.theme)
+      applyTheme()
+    })
+    const input = document.getElementById('file-input')
+    document.getElementById('open-files').addEventListener('click', () => input.click())
+    input.addEventListener('change', () => {
+      openFiles(input.files)
+      input.value = ''
+    })
+    document.addEventListener('dragover', event => {
+      event.preventDefault()
+      document.body.classList.add('dragging')
+    })
+    document.addEventListener('dragleave', event => {
+      if (event.target === document.documentElement || event.relatedTarget === null) document.body.classList.remove('dragging')
+    })
+    document.addEventListener('drop', event => {
+      event.preventDefault()
+      document.body.classList.remove('dragging')
+      openFiles(event.dataTransfer && event.dataTransfer.files)
+    })
+    window.addEventListener('hashchange', () => {
+      const id = fromHash()
+      if (id !== state.current) choose(id)
+    })
+    let timer = 0
+    window.addEventListener('resize', () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => state.current && render(), 120)
+    })
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') hideTip()
+    })
+
+    const first = fromHash()
+    if (first) choose(first)
+    else render()
+  }
+
+  if (!['auto', 'light', 'dark'].includes(state.theme)) state.theme = 'auto'
+  start()
+})()
+</script>
+</body>
+</html>
