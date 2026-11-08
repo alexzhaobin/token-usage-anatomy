@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      # Claude Code runs signed out here: validate and test need no account.
+      DISABLE_AUTOUPDATER: '1'
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install Claude Code
+        run: npm install --global @anthropic-ai/claude-code
+
+      - name: Validate the plugin (strict)
+        run: claude plugin validate --strict .
+
+      - name: Unit tests
+        run: claude plugin test .
+
+      - name: Plugin directory file rules
+        run: node scripts/check-files.mjs
+
+      - name: Transcript readers (io.sh, io.ps1)
+        run: node --experimental-strip-types --no-warnings scripts/check-reader.mjs
+
+      - name: Viewer in headless Chrome
+        run: node --experimental-strip-types --no-warnings scripts/check-viewer.mjs

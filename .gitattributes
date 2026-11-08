@@ -1,0 +1,3 @@
+# Line ends: LF everywhere, so io.sh runs wherever the repository is cloned.
+* text=auto eol=lf
+*.png binary

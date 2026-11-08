@@ -173,7 +173,9 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 async function launch(browser) {
   const profile = join(work, 'profile')
-  const child = spawn(browser, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--window-size=1200,900', 'about:blank'], { stdio: 'ignore' })
+  // Ubuntu's AppArmor blocks Chrome's sandbox on CI runners; elsewhere it stays on.
+  const sandbox = process.platform === 'linux' && process.env.CI ? ['--no-sandbox'] : []
+  const child = spawn(browser, [...sandbox, '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--window-size=1200,900', 'about:blank'], { stdio: 'ignore' })
   const portFile = join(profile, 'DevToolsActivePort')
   for (let i = 0; i < 150 && !existsSync(portFile); i += 1) await sleep(100)
   if (!existsSync(portFile)) throw new Error('the browser did not open a DevTools port')
