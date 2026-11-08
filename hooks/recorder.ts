@@ -384,6 +384,7 @@ export class Recorder {
       label: labelOf(turn.text),
       tokens: tokenParts(priced),
       subagentTokens: subagents === undefined ? 0 : tokenTotal(subagents.tokens),
+      subagentCacheRead: subagents === undefined ? 0 : subagents.tokens.cacheRead,
       parts: built.parts,
       subagentUsd: built.subagentUsd,
       unattributedUsd: built.unattributedUsd,

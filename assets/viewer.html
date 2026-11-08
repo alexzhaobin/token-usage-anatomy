@@ -213,7 +213,8 @@
     <label for="session" class="visually-hidden">Session</label>
     <select id="session"></select>
     <span class="segmented" role="group" aria-label="Show">
-      <button type="button" id="unit-tokens" aria-pressed="true">Tokens</button>
+      <button type="button" id="unit-tokens" aria-pressed="true">New tokens</button>
+      <button type="button" id="unit-cacheRead" aria-pressed="false">Cache read</button>
       <button type="button" id="unit-usd" aria-pressed="false">$ API list-price equivalent</button>
     </span>
     <button type="button" id="open-files">Open .jsonl files…</button>
@@ -371,7 +372,8 @@
     sessions: new Map(),
     /** A session id or 'all'. */
     current: null,
-    unit: remember('tua-unit', 'tokens') === 'usd' ? 'usd' : 'tokens',
+    /** New tokens (everything but cache reads), cache reads alone, or dollars. */
+    unit: ['tokens', 'cacheRead', 'usd'].includes(remember('tua-unit', 'tokens')) ? remember('tua-unit', 'tokens') : 'tokens',
     theme: remember('tua-theme', 'auto'),
     /** Parts switched off in the legends. */
     hidden: new Set(),
@@ -661,8 +663,21 @@
   const barName = (view, p) => (view.isAll ? `S${view.order.get(p.session)}·${p.n}` : `#${p.n}`)
   const unitIsUsd = () => state.unit === 'usd'
   const amount = value => (unitIsUsd() ? fmtUsd(value) : fmtTokens(value))
-  const partsShown = () => PARTS.filter(part => !part.usdOnly || unitIsUsd())
-  const valuesOf = p => p.values[state.unit]
+  const UNIT_TITLES = { tokens: 'New tokens per prompt', cacheRead: 'Cache reads per prompt', usd: 'API list-price equivalent per prompt' }
+
+  /** The parts each view draws: new tokens leave out cache reads, which have a view of their own. */
+  function partsShown() {
+    if (state.unit === 'tokens') return PARTS.filter(part => part.key !== 'cacheRead' && !part.usdOnly)
+    if (state.unit === 'cacheRead') return PARTS.filter(part => part.key === 'cacheRead' || part.key === 'subagents')
+    return PARTS
+  }
+
+  function valuesOf(p) {
+    const agentRead = p.agentTokens.cacheRead
+    if (state.unit === 'tokens') return { ...p.values.tokens, cacheRead: 0, subagents: Math.max(0, tokenTotal(p.agentTokens) - agentRead) }
+    if (state.unit === 'cacheRead') return { cacheRead: p.tokens.cacheRead, cacheWrite: 0, input: 0, reasoning: 0, answer: 0, subagents: agentRead, unattributed: 0 }
+    return p.values.usd
+  }
   const barTotal = p => {
     const values = valuesOf(p)
     return PARTS.reduce((total, part) => total + num(values[part.key]), 0)
@@ -749,9 +764,12 @@
     for (const p of prompts) for (const [model, count] of Object.entries(p.models)) models[model] = (models[model] || 0) + num(count)
     const ranked = Object.entries(models).sort((a, b) => b[1] - a[1])
 
-    const first = unitIsUsd()
-      ? tile('API list-price equivalent', fmtUsd(usd), (unattributed >= 0.0005 ? `incl. ${fmtUsd(unattributed)} unattributed · ` : '') + (over >= 0.0005 ? `priced ${fmtUsd(over)} above Claude Code's count · ` : '') + `${fmtTokens(tokens)} tokens`)
-      : tile('Tokens', fmtTokens(tokens), `≈ ${fmtUsd(usd)} API list-price equivalent`)
+    const reads = sum(prompts, p => p.tokens.cacheRead + p.agentTokens.cacheRead)
+    const first = {
+      usd: () => tile('API list-price equivalent', fmtUsd(usd), (unattributed >= 0.0005 ? `incl. ${fmtUsd(unattributed)} unattributed · ` : '') + (over >= 0.0005 ? `priced ${fmtUsd(over)} above Claude Code's count · ` : '') + `${fmtTokens(tokens)} tokens`),
+      cacheRead: () => tile('Cache reads', fmtTokens(reads), `the context re-read with each request, at a tenth of the input price · ${fmtShare(reads, tokens)} of all tokens`),
+      tokens: () => tile('New tokens', fmtTokens(tokens - reads), `plus ${fmtTokens(reads)} cache reads · ≈ ${fmtUsd(usd)} API list-price equivalent`),
+    }[state.unit]()
 
     return h(
       'section',
@@ -813,7 +831,7 @@
     if (prompts.length >= 3 && tokens > 0) {
       const top = prompts.reduce((best, p) => (allTokens(p) > allTokens(best) ? p : best), prompts[0])
       if (allTokens(top) / tokens >= 0.25) {
-        out.push(`Prompt ${barName(view, top)}${top.label ? ` (“${top.label}”)` : ''} used ${fmtShare(allTokens(top), tokens)} of the tokens: ${plural(top.requests, 'request')}, each re-sending up to ${fmtTokens(top.contextPeak)} of context.`)
+        out.push(`Prompt ${barName(view, top)}${top.label ? ` (“${top.label}”)` : ''} used ${fmtShare(allTokens(top), tokens)} of all tokens, cache reads included: ${plural(top.requests, 'request')}, each re-sending up to ${fmtTokens(top.contextPeak)} of context.`)
       }
     }
 
@@ -836,7 +854,7 @@
     const agentTokens = sum(prompts, p => tokenTotal(p.agentTokens))
     if (tokens > 0 && agentTokens / tokens >= 0.1) {
       const count = sum(prompts, p => (p.agents ? num(p.agents.agentCount) : 0))
-      out.push(`Subagents used ${fmtShare(agentTokens, tokens)} of the tokens (${plural(count, 'agent')}). Each has its own context, so its work does not fill yours.`)
+      out.push(`Subagents used ${fmtShare(agentTokens, tokens)} of all tokens, cache reads included (${plural(count, 'agent')}). Each has its own context, so its work does not fill yours.`)
     }
 
     // Thinking.
@@ -1047,7 +1065,7 @@
       const keys = partsShown().map(part => part.key).filter(key => !state.hidden.has(key))
       holder.append(
         columnChart({
-          label: unitIsUsd() ? 'API list-price equivalent per prompt' : 'Tokens per prompt',
+          label: UNIT_TITLES[state.unit],
           width,
           keys,
           format: amount,
@@ -1061,10 +1079,15 @@
       )
     }
     draw()
+    const ledes = {
+      tokens: 'What each prompt added: uncached input, cache writes, thinking and answer, and its subagents’ new tokens, over every model request it took. Cache reads, the context re-sent with each request, have their own view.',
+      cacheRead: 'The context re-sent with each model request and read from the cache. A prompt reads it once per request, so a prompt with many tool calls reads many times the context’s size, at a tenth of the input price.',
+      usd: 'What each prompt’s requests would cost at API list prices, cache reads included.',
+    }
     return card(
       'chart-prompts',
-      unitIsUsd() ? 'API list-price equivalent per prompt' : 'Tokens per prompt',
-      'Each column adds up every model request the prompt took. Each request re-sends the whole context, so a prompt with many tool calls can process many times the context’s size.',
+      UNIT_TITLES[state.unit],
+      ledes[state.unit],
       legend(partsShown(), draw),
       holder,
     )
@@ -1085,7 +1108,8 @@
       }
     })
     const keys = partsShown().map(part => part.key).filter(key => !state.hidden.has(key))
-    return card('chart-growth', unitIsUsd() ? 'Running total, API list-price equivalent' : 'Running total of tokens', 'How the total grows prompt by prompt, by part.', columnChart({ label: 'Running total', width, keys, format: amount, bars, height: 200 }))
+    const titles = { tokens: 'Running total of new tokens', cacheRead: 'Running total of cache reads', usd: 'Running total, API list-price equivalent' }
+    return card('chart-growth', titles[state.unit], 'How the total grows prompt by prompt, by part.', columnChart({ label: 'Running total', width, keys, format: amount, bars, height: 200 }))
   }
 
   function multiplesCard(view) {
@@ -1114,7 +1138,7 @@
         )
       })
       .filter(Boolean)
-    return card('chart-multiples', 'Each part on its own scale', 'Small parts such as uncached input disappear beside cache reads; here each has its own scale.', h('div', { class: 'multiples' }, panels))
+    return card('chart-multiples', 'Each part on its own scale', 'Small parts such as uncached input disappear beside the large ones; here each has its own scale.', h('div', { class: 'multiples' }, panels))
   }
 
   // ---------------------------------------------------------------- context
@@ -1483,8 +1507,7 @@
   }
 
   function applyUnit() {
-    document.getElementById('unit-tokens').setAttribute('aria-pressed', String(state.unit === 'tokens'))
-    document.getElementById('unit-usd').setAttribute('aria-pressed', String(state.unit === 'usd'))
+    for (const unit of ['tokens', 'cacheRead', 'usd']) document.getElementById('unit-' + unit).setAttribute('aria-pressed', String(state.unit === unit))
   }
 
   function setUnit(unit) {
@@ -1502,8 +1525,7 @@
     fillPicker()
 
     document.getElementById('session').addEventListener('change', event => choose(event.target.value))
-    document.getElementById('unit-tokens').addEventListener('click', () => setUnit('tokens'))
-    document.getElementById('unit-usd').addEventListener('click', () => setUnit('usd'))
+    for (const unit of ['tokens', 'cacheRead', 'usd']) document.getElementById('unit-' + unit).addEventListener('click', () => setUnit(unit))
     document.getElementById('reload').addEventListener('click', () => location.reload())
     document.getElementById('theme').addEventListener('click', () => {
       const order = ['auto', 'light', 'dark']

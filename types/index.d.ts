@@ -32,6 +32,8 @@ export type CostRow = {
   tokens: TokenParts
   /** Every token the prompt's subagents used, all parts together. */
   subagentTokens: number
+  /** The part of subagentTokens read from the cache. Absent on bars an earlier version kept. */
+  subagentCacheRead?: number
   parts: CostParts
   subagentUsd: number
   /** What the engine's session cost grew by beyond the mod's own pricing. */
@@ -90,8 +92,8 @@ declare module 'claude-code' {
       isHidden: boolean
       /** The terminal's theme is light. */
       isLight: boolean
-      /** What the band's bars measure. */
-      unit: 'tokens' | 'usd'
+      /** What the band's bars measure: new tokens (the default), cache reads alone, or dollars. */
+      unit: 'tokens' | 'cacheRead' | 'usd'
     }
   }
 }

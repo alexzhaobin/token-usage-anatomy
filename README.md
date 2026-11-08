@@ -8,7 +8,7 @@ A Claude Code mod that shows how every prompt turns into input, output, cache-re
 
 ## The chart and /token-anatomy
 
-Above the prompt box (terminal and desktop app) a bar per prompt shows its tokens by type: cache reads, cache writes, uncached input, thinking and answer, plus subagents. A button switches to the API list-price equivalent in dollars. The title line counts down until the prompt cache goes cold. Under each bar is the number of model requests the prompt took, and below the chart the context window as it stands now. Every request re-sends the whole context, so one prompt's bar is often many times the context's size.
+Above the prompt box (terminal and desktop app) a bar per prompt shows the **new tokens** it took, by type: uncached input, cache writes, thinking and answer, plus subagents. Cache reads, the context re-sent with every model request, have a view of their own (they are usually most of the count, at a tenth of the input price), and a third view shows the API list-price equivalent in dollars. The title line counts down until the prompt cache goes cold. Under each bar is the number of model requests the prompt took, and below the chart the context window as it stands now. Every request re-sends the whole context, so one prompt's bar is often many times the context's size.
 
 - `/token-anatomy` toggles the chart; `show` and `hide` set it.
 - `/token-anatomy open` prints the link to `viewer.html`.
@@ -19,7 +19,7 @@ Above the prompt box (terminal and desktop app) a bar per prompt shows its token
 `viewer.html` sits in the log folder and opens from disk in any browser, offline. It reads the folder's `data/*.js` copies of the logs (a page opened from disk cannot read `.jsonl` files itself), or any `.jsonl` logs you open or drop on it.
 
 - Totals, then **What stands out**: plain-language findings computed from your rows, such as a cold cache and what writing it again cost, one prompt doing most of the work, or tool results filling the context. A finding appears only when the rows support it.
-- Tokens per prompt by type, the running total, each type on its own scale, the context size at every model request, what fills the context window, tool results, subagents and the cache hit rate. A button switches every chart to the API list-price equivalent.
+- New tokens per prompt by type, the running total, each type on its own scale, the context size at every model request, what fills the context window, tool results, subagents and the cache hit rate. Buttons switch every chart to cache reads alone or to the API list-price equivalent.
 - Every prompt and every model request in tables, and notes on how each figure was measured or estimated.
 - Charts work from the keyboard (one Tab stop each, arrow keys between columns, Escape closes the tooltip) and follow your light or dark theme.
 

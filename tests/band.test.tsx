@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { barCells, barCount, cacheText, contextLine, preloadedLine, requestLabel, viewerHref } from '../hooks/band'
+import { barCells, barCount, cacheText, contextLine, preloadedLine, requestLabel, segmentValues, viewerHref } from '../hooks/band'
 import { countdown, money, percent, tokensShort } from '../hooks/format'
 import {
   customSlug,
@@ -19,6 +19,7 @@ const row = (n: number, label: string, scale = 1): CostRow => ({
   // 7,310 tokens at scale 1: mostly cache reads, as in real sessions.
   tokens: { input: 10 * scale, cacheRead: 5_000 * scale, cacheWrite: 2_000 * scale, reasoning: 120 * scale, answer: 180 * scale },
   subagentTokens: 0,
+  subagentCacheRead: 0,
   parts: { input: 0.00004, cacheRead: 0.001, cacheWrite: 0.016, reasoning: 0.0024, answer: 0.0036 },
   subagentUsd: 0,
   unattributedUsd: 0,
@@ -206,16 +207,27 @@ describe('the band', () => {
       seed(on, BASE)
       const ui = await $.ui.mount({ ...BAND(), surface })
 
-      expect((await ui.find({ type: 'Text', text: /Tokens per prompt/ }))?.text).toBe('Tokens per prompt ')
-      expect(await ui.find({ type: 'Text', text: /last 3 of 3: 43.9k tokens/ })).toBeDefined()
+      // New tokens first: cache reads, the context re-sent with each request, have their own view.
+      expect((await ui.find({ type: 'Text', text: /New tokens per prompt/ }))?.text).toBe('New tokens per prompt ')
+      expect(await ui.find({ type: 'Text', text: /last 3 of 3: 13.9k new, plus 30k cache reads/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /cache warm 4:00/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /Explai… +Fix th… +Add te…/ })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: / cache read / })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: / cache write / })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: / cache read / })).toBeUndefined()
       expect(await ui.find({ type: 'Text', text: /4 req +12 req +8 req/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /^Context now 90k \(9\.0% of 1M\) · re-sent with every request/ })).toBeDefined()
 
-      await ui.press({ key: 'unit' })
+      await ui.press({ key: 'unit-cacheRead' })
+      expect(await ui.find({ type: 'Text', text: /Cache reads per prompt/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /last 3 of 3: 30k re-read from the cache/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: / cache read / })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: / cache write / })).toBeUndefined()
+
+      await ui.press({ key: 'unit-usd' })
       expect(await ui.find({ type: 'Text', text: /API list-price equivalent per prompt/ })).toBeDefined()
+
+      await ui.press({ key: 'unit-tokens' })
+      expect(await ui.find({ type: 'Text', text: /New tokens per prompt/ })).toBeDefined()
       await ui.unmount()
     })
   }
@@ -226,7 +238,7 @@ describe('the band', () => {
 
     expect(await ui.find({ type: 'Text', text: /Token chart hidden/ })).toBeDefined()
     await ui.press({ key: 'show' })
-    expect(await ui.find({ type: 'Text', text: /Tokens per prompt/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /New tokens per prompt/ })).toBeDefined()
     await ui.unmount()
   })
 
@@ -234,7 +246,7 @@ describe('the band', () => {
     seed(on, BASE)
     const ui = await $.ui.mount({ ...BAND(5), surface: 'terminal' })
 
-    expect(await ui.find({ type: 'Text', text: /last prompt 14.6k · 3 prompts 43.9k · context 90k \(9\.0%\)/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /last prompt 4.6k · 3 prompts 13.9k · context 90k \(9\.0%\)/ })).toBeDefined()
     await ui.unmount()
   })
 
@@ -255,8 +267,17 @@ describe('the band', () => {
       },
     })
 
-    expect(await ui.find({ type: 'Text', text: /Tokens per prompt/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /New tokens per prompt/ })).toBeDefined()
     await ui.unmount()
+  })
+
+  test('subagents count their own cache reads in the cache read view, the rest as new', () => {
+    const withAgents = { ...row(1, 'Delegate'), subagentTokens: 10_000, subagentCacheRead: 7_000 }
+
+    expect(segmentValues(withAgents, 'tokens')).toMatchObject({ cacheRead: 0, subagents: 3_000 })
+    expect(segmentValues(withAgents, 'cacheRead')).toEqual({ cacheRead: 5_000, cacheWrite: 0, input: 0, reasoning: 0, answer: 0, subagents: 7_000, unattributed: 0 })
+    // A bar an earlier version kept has no split: all of it counts as new.
+    expect(segmentValues({ ...withAgents, subagentCacheRead: undefined }, 'tokens').subagents).toBe(10_000)
   })
 })
 

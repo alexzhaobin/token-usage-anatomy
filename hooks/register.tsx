@@ -441,7 +441,7 @@ export const register: Register = (on, options) => {
     const actions: BandActions = {
       hide: () => void update($, isHiddenAtom, () => true),
       show: () => void update($, isHiddenAtom, () => false),
-      toggleUnit: () => void update($, unitAtom, unit => (unit === 'tokens' ? 'usd' : 'tokens')),
+      setUnit: unit => void update($, unitAtom, () => unit),
     }
 
     return drawBand($.ui.resolve(e), view, actions, await read($, isHiddenAtom)) ?? next(e)
@@ -470,7 +470,7 @@ export const register: Register = (on, options) => {
     const actions: BandActions = {
       hide: () => void $.ui.close({ id: PANE_ID }),
       show: () => undefined,
-      toggleUnit: () => void update($, unitAtom, unit => (unit === 'tokens' ? 'usd' : 'tokens')),
+      setUnit: unit => void update($, unitAtom, () => unit),
     }
     const { Text } = $.ui.resolve(e)
 

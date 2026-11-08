@@ -367,6 +367,16 @@ try {
   await cdp.until(`!!document.querySelector('#table-requests table')`, 'the request table')
   check('the request table tags fast and US-only requests', await cdp.eval(`[...document.querySelectorAll('#table-requests .tag')].map(t => t.textContent).join(',') === 'fast,fast,US-only'`))
 
+  // New tokens first; cache reads have their own view.
+  const legendOf = () => cdp.eval(`[...document.querySelectorAll('#chart-prompts .legend button')].map(b => b.textContent).join(',')`)
+  check('new tokens first, without cache reads', (await cdp.eval(`document.querySelector('#chart-prompts h2').textContent`)) === 'New tokens per prompt' && !(await legendOf()).includes('Cache read'), await legendOf())
+  check('the first tile counts new tokens and names the cache reads beside them', (await cdp.eval(`document.querySelector('#tiles .tile').innerText`)).startsWith('New tokens\n') && (await cdp.eval(`document.querySelector('#tiles .tile .more').textContent`)).startsWith('plus '))
+  await cdp.eval(`document.getElementById('unit-cacheRead').click()`)
+  check('the cache read view draws cache reads alone (and subagents’)', (await cdp.eval(`document.querySelector('#chart-prompts h2').textContent`)) === 'Cache reads per prompt' && (await legendOf()) === 'Cache read,Subagents', await legendOf())
+  // 150,000 a prompt and the subagent's 60,000: 660k.
+  check('… and its tile adds up every cache read', (await cdp.eval(`document.querySelector('#tiles .tile .value').textContent`)) === '660k')
+  await noBadNumbers('cache reads')
+
   // Dollars.
   await cdp.eval(`document.getElementById('unit-usd').click()`)
   check('the $ button shows the API list-price equivalent', (await cdp.eval(`document.querySelector('#chart-prompts h2').textContent`)) === 'API list-price equivalent per prompt' && (await cdp.eval(`document.querySelector('#tiles .tile .name').textContent`)) === 'API list-price equivalent')

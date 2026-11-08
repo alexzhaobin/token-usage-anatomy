@@ -1,6 +1,8 @@
 // The chart above the prompt (and in a pane where a surface has no band):
-// one stacked bar per prompt, tokens by type by default, or their API
-// list-price equivalent in dollars. Pure drawing over the session's values:
+// one stacked bar per prompt in one of three views. New tokens (the
+// default) leave out cache reads, the context re-sent with every request,
+// which have a view of their own; the third is the API list-price
+// equivalent in dollars. Pure drawing over the session's values:
 // register.tsx reads the values and hands over the surface's elements.
 
 import type { BoxProps, ButtonProps, ElementConstructor, LinkProps, RenderElement, TextProps } from 'claude-code'
@@ -15,7 +17,14 @@ export type Elements = {
   Link: ElementConstructor<LinkProps>
 }
 
-export type Unit = 'tokens' | 'usd'
+/** `tokens` is new tokens: everything but cache reads. */
+export type Unit = 'tokens' | 'cacheRead' | 'usd'
+
+export const UNITS: ReadonlyArray<{ unit: Unit; button: string; title: string }> = [
+  { unit: 'tokens', button: 'new', title: 'New tokens per prompt' },
+  { unit: 'cacheRead', button: 'cache read', title: 'Cache reads per prompt' },
+  { unit: 'usd', button: '$', title: 'API list-price equivalent per prompt' },
+]
 
 /** The left axis, each bar's column and the bar itself, in cells. */
 export const AXIS = 8
@@ -52,8 +61,14 @@ const colorOf = (key: SegmentKey, isLight: boolean): string => {
 }
 
 export function segmentValues(row: CostRow, unit: Unit): Record<SegmentKey, number> {
+  const agentRead = row.subagentCacheRead ?? 0
+
   if (unit === 'tokens') {
-    return { ...row.tokens, subagents: row.subagentTokens, unattributed: 0 }
+    return { ...row.tokens, cacheRead: 0, subagents: Math.max(0, row.subagentTokens - agentRead), unattributed: 0 }
+  }
+
+  if (unit === 'cacheRead') {
+    return { cacheRead: row.tokens.cacheRead, cacheWrite: 0, input: 0, reasoning: 0, answer: 0, subagents: agentRead, unattributed: 0 }
   }
 
   return { ...row.parts, subagents: row.subagentUsd, unattributed: row.unattributedUsd }
@@ -63,7 +78,7 @@ export function barTotal(row: CostRow, unit: Unit): number {
   return Object.values(segmentValues(row, unit)).reduce((sum, value) => sum + value, 0)
 }
 
-export const amount = (value: number, unit: Unit): string => (unit === 'tokens' ? tokensShort(value) : money(value))
+export const amount = (value: number, unit: Unit): string => (unit === 'usd' ? money(value) : tokensShort(value))
 
 /** How many prompts' bars fit across. */
 export function barCount(columns: number): number {
@@ -194,8 +209,11 @@ export type BandView = {
 export type BandActions = {
   hide: () => void
   show: () => void
-  toggleUnit: () => void
+  setUnit: (unit: Unit) => void
 }
+
+/** The other two views' buttons, keyed by view. */
+const otherUnits = (unit: Unit) => UNITS.filter(item => item.unit !== unit)
 
 type Span = { text: string; bold?: boolean; dim?: boolean; color?: string }
 
@@ -205,10 +223,21 @@ function titleSpans(view: BandView, shown: readonly CostRow[]): Span[] {
 
   if (view.unit === 'tokens') {
     const usd = sum(row => barTotal(row, 'usd'))
+    const read = sum(row => barTotal(row, 'cacheRead'))
 
     return [
-      { text: 'Tokens per prompt ', bold: true },
-      { text: `${of}: ${tokensShort(sum(row => barTotal(row, 'tokens')))} tokens (≈${money(usd)} at API list prices)`, dim: true },
+      { text: 'New tokens per prompt ', bold: true },
+      {
+        text: `${of}: ${tokensShort(sum(row => barTotal(row, 'tokens')))} new` + (read > 0 ? `, plus ${tokensShort(read)} cache reads` : '') + ` (≈${money(usd)} at API list prices)`,
+        dim: true,
+      },
+    ]
+  }
+
+  if (view.unit === 'cacheRead') {
+    return [
+      { text: 'Cache reads per prompt ', bold: true },
+      { text: `${of}: ${tokensShort(sum(row => barTotal(row, 'cacheRead')))} re-read from the cache, at a tenth of the input price`, dim: true },
     ]
   }
 
@@ -263,8 +292,12 @@ export function drawBand(
   const unit = view.unit
   const shown = view.rows.slice(-barCount(view.columns))
   const cache = view.cache === undefined ? undefined : cacheText(view.cache)
-  const unitLabel = unit === 'tokens' ? '$' : 'tokens'
-  const buttonsWidth = unitLabel.length + 4 + 'Hide'.length + 4
+  const others = otherUnits(unit)
+  const buttonsWidth = others.reduce((width, item) => width + item.button.length + 5, 0) + 'Hide'.length + 4
+  const unitButtons = others.flatMap(item => [
+    <Button key={`unit-${item.unit}`} label={item.button} onPress={() => actions.setUnit(item.unit)} />,
+    <Text> </Text>,
+  ])
   const cacheSpan: Span[] = cache === undefined ? [] : [{ text: `  ${cache.text} `, color: cache.color, dim: cache.color === undefined }]
   const spans = [...titleSpans(view, shown), ...cacheSpan]
   const title = (
@@ -275,8 +308,7 @@ export function drawBand(
         </Text>
       ))}
       <Text> </Text>
-      <Button key="unit" label={unitLabel} onPress={actions.toggleUnit} />
-      <Text> </Text>
+      {unitButtons}
       <Button key="hide" label="Hide" onPress={actions.hide} />
     </Box>
   )
@@ -286,6 +318,14 @@ export function drawBand(
   const preloaded = view.preloaded === null ? undefined : preloadedLine(view.preloaded, view.columns)
   const hasOver = unit === 'usd' && shown.some(row => row.overUsd >= NOISE_USD)
   const legend = SEGMENTS.filter(segment => {
+    if (unit === 'tokens' && segment.key === 'cacheRead') {
+      return false
+    }
+
+    if (unit === 'cacheRead' && segment.key !== 'cacheRead' && segment.key !== 'subagents') {
+      return false
+    }
+
     if (segment.key === 'subagents') {
       return shown.some(row => segmentValues(row, unit).subagents > 0)
     }
@@ -317,7 +357,7 @@ export function drawBand(
 
     return (
       <Box flexDirection="row" flexWrap="wrap">
-        <Text bold>{unit === 'tokens' ? 'Tokens ' : 'API list-price equivalent '}</Text>
+        <Text bold>{unit === 'tokens' ? 'New tokens ' : unit === 'cacheRead' ? 'Cache reads ' : 'API list-price equivalent '}</Text>
         <Text dimColor>
           last prompt {last === undefined ? '' : amount(barTotal(last, unit), unit)} · {shown.length} prompts{' '}
           {amount(
@@ -335,8 +375,7 @@ export function drawBand(
           </Text>
         )}
         <Text> </Text>
-        <Button key="unit" label={unitLabel} onPress={actions.toggleUnit} />
-        <Text> </Text>
+        {unitButtons}
         <Button key="hide" label="Hide" onPress={actions.hide} />
       </Box>
     )
