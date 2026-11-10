@@ -1505,7 +1505,7 @@
 
     if (prompts.some(p => p.agents)) notes.push('Subagent figures come from their own transcripts and are estimates where a subagent was still running when its prompt ended.')
     if (prompts.some(p => p.toolResultTokens > 0)) notes.push('Tool result tokens are estimated from result sizes at four characters a token.')
-    if (!prompts.some(p => p.label || p.prompt)) notes.push('Prompt text is not recorded (includePromptText is off), so prompts are shown by number.')
+    if (!prompts.some(p => p.label || p.prompt)) notes.push('Prompt text is not recorded (includePromptText is off, or these prompts came before it was on), so prompts are shown by number.')
 
     const newer = sum(view.sessions, s => s.newerRows)
     if (newer > 0) notes.push(`${plural(newer, 'row')} written by a newer version of the mod ${newer === 1 ? 'was' : 'were'} skipped; update the viewer by starting a session with the newer mod.`)

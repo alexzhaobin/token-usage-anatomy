@@ -51,7 +51,8 @@ const USAGE = 'Usage: /token-anatomy [show|hide|open]'
 function configOf(options: PluginOptions): Config {
   return {
     recordRequests: options.recordRequests === true,
-    includePromptText: options.includePromptText === true,
+    // On unless turned off.
+    includePromptText: options.includePromptText !== false,
     logDir: typeof options.logDir === 'string' ? options.logDir.trim() : '',
   }
 }

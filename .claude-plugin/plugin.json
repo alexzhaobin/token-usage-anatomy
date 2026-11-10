@@ -21,7 +21,7 @@
       "type": "boolean",
       "title": "Store prompt text",
       "description": "Keep the first 2000 characters of each prompt in its row (stays on this machine)",
-      "default": false
+      "default": true
     },
     "logDir": {
       "type": "string",

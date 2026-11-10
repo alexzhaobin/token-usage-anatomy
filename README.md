@@ -57,7 +57,7 @@ Set these with `/plugin` in Claude Code, or `claude plugin configure token-usage
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `recordRequests` | off | Also writes one row per model request, subagents' included |
-| `includePromptText` | off | Stores the first 2,000 characters of each prompt in its row, so the viewer can label prompts. Off, prompts are shown by number and no prompt text is written anywhere |
+| `includePromptText` | on | Stores the first 2,000 characters of each prompt in its row, so the viewer can label prompts. Off, prompts are shown by number and no prompt text is written anywhere |
 | `logDir` | empty | The log folder. Empty means `~/.claude/token-usage-anatomy/` |
 
 ## What it reads, writes and runs

@@ -44,7 +44,7 @@ Read what `validate` prints under `hooks:` and `calls:`. A new hook, `$` call, e
 
 - **Every hook catches its own errors.** Wrap new work in `try`/`catch` (or `.catch(($, e, next) => next(e))` on a gating hook) and log failures with `$.ui.log(..., { to: 'debug' })`. A failure in the mod must never reach the session.
 - **No network, no telemetry**, and no writes outside the log folder.
-- **Privacy**: tool results are measured, never stored. Prompt text is written only when `includePromptText` is on.
+- **Privacy**: tool results are measured, never stored. Prompt text is written unless `includePromptText` is turned off.
 - **No runtime dependencies**, no lockfile, readable unminified source, PNG for images. `scripts/check-files.mjs` enforces the plugin directory's rules.
 - **Cross-platform**: anything that touches paths or runs a process works on macOS, Linux and Windows. Pass paths as arguments, never inside a command string.
 - **Logged text is data.** Anything written into `data/*.js` goes through `scriptString`; the viewer sets logged text with `textContent`, never as markup.

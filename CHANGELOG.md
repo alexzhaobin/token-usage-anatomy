@@ -7,6 +7,7 @@ All notable changes to this mod are listed here. The format follows [Keep a Chan
 ### Changed
 
 - The band's button for the default view reads "new tokens" instead of "new".
+- `includePromptText` is now on by default, so the viewer labels prompts by their opening words. Turn it off to keep prompt text out of the log.
 
 ## [0.1.0] - 2026-11-09
 

@@ -221,9 +221,8 @@ describe('a prompt, end to end', () => {
     // The bar knows how many requests made it and the context they left.
     expect(JSON.stringify(bars.at(-1))).toContain('"requests":1,"context":{"tokens":7310,"window":1000000}')
 
-    // Prompt text is off by default: neither the label nor the text is logged.
-    expect(row?.label).toBeUndefined()
-    expect(row?.prompt).toBeUndefined()
+    // Prompt text is on by default, so the viewer can label the prompt.
+    expect(row).toMatchObject({ label: 'Explain the log fields', prompt: 'Explain the log fields' })
 
     // The viewer copy and the index are written beside the log.
     expect(world.files.get(`${DIR}/data/session-1.js`)?.startsWith('(window.TUA_DATA')).toBe(true)
@@ -270,6 +269,24 @@ describe('options', () => {
       expect(copy.includes('\u2028')).toBe(false)
     },
   )
+
+  test('no prompt text when turned off', { options: { includePromptText: false } }, async ($, on) => {
+    const world = standIn(on)
+    world.files.set(TRANSCRIPT, lines(0, 2))
+
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: false })
+    await $.classic.SessionStart({ source: 'startup', transcript_path: TRANSCRIPT })
+    await $.turn.start({ turnId: 't1', text: 'A secret plan' })
+    await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }))
+    world.files.set(TRANSCRIPT, lines(0, 4))
+    await $.turn.complete({ turnId: 't1', reason: 'answer', answer: '', durationMs: 9, isAborted: false, usage: USAGE_A })
+    await until(() => promptRows(world).length > 0)
+
+    const [row] = promptRows(world)
+    expect(row?.label).toBeUndefined()
+    expect(row?.prompt).toBeUndefined()
+    expect(world.files.get(`${DIR}/data/session-1.js`)?.includes('secret')).toBe(false)
+  })
 })
 
 describe('robustness', () => {
