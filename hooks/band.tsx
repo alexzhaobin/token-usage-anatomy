@@ -21,7 +21,7 @@ export type Elements = {
 export type Unit = 'tokens' | 'cacheRead' | 'usd'
 
 export const UNITS: ReadonlyArray<{ unit: Unit; button: string; title: string }> = [
-  { unit: 'tokens', button: 'new', title: 'New tokens per prompt' },
+  { unit: 'tokens', button: 'new tokens', title: 'New tokens per prompt' },
   { unit: 'cacheRead', button: 'cache read', title: 'Cache reads per prompt' },
   { unit: 'usd', button: '$', title: 'API list-price equivalent per prompt' },
 ]

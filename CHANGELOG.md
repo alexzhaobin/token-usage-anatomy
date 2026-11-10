@@ -4,6 +4,10 @@ All notable changes to this mod are listed here. The format follows [Keep a Chan
 
 ## [Unreleased]
 
+### Changed
+
+- The band's button for the default view reads "new tokens" instead of "new".
+
 ## [0.1.0] - 2026-11-09
 
 The first release.
