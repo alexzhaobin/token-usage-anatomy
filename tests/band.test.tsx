@@ -187,6 +187,7 @@ const BAND = (maxRows = 24) =>
     requestId: 'band',
     props: {
       hasSurvey: false,
+      isCollapsed: false,
       isWorking: false,
       maxRows,
       bodyColumns: 80,
@@ -239,6 +240,33 @@ describe('the band', () => {
     expect(await ui.find({ type: 'Text', text: /Token chart hidden/ })).toBeDefined()
     await ui.press({ key: 'show' })
     expect(await ui.find({ type: 'Text', text: /New tokens per prompt/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  const MISSED = { ...BASE, rows: { shape: 'rows-1', value: [ROWS[0], { ...ROWS[1], cacheLost: 452_233 }, ROWS[2]] } }
+
+  test('a cache miss is marked under its bar', async ($, on) => {
+    seed(on, MISSED)
+    const ui = await $.ui.mount({ ...BAND(), surface: 'terminal' })
+
+    expect((await ui.find({ type: 'Text', text: /missed/ }))?.text).toBe('missed  ')
+    expect((await ui.find({ type: 'Text', text: /✗/ }))?.text).toBe('✗ 452k   ')
+    await ui.unmount()
+  })
+
+  test('short on rows, the line names the prompts that missed', async ($, on) => {
+    seed(on, MISSED)
+    const ui = await $.ui.mount({ ...BAND(5), surface: 'terminal' })
+
+    expect(await ui.find({ type: 'Text', text: /cache missed at #2/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('no misses, no missed row', async ($, on) => {
+    seed(on, BASE)
+    const ui = await $.ui.mount({ ...BAND(), surface: 'terminal' })
+
+    expect(await ui.find({ type: 'Text', text: /missed/ })).toBeUndefined()
     await ui.unmount()
   })
 

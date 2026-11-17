@@ -36,6 +36,9 @@ const MIN_BAR_ROWS = 3
 /** Below half a tenth of a cent a dollar difference is noise. */
 const NOISE_USD = 0.0005
 
+/** A cache miss's mark, the countdown's last colour. */
+const MISS_COLOR = '#d63c3c'
+
 export type SegmentKey = 'cacheRead' | 'cacheWrite' | 'input' | 'reasoning' | 'answer' | 'subagents' | 'unattributed'
 
 type Segment = { key: SegmentKey; label: string; light: string; dark: string }
@@ -339,6 +342,7 @@ export function drawBand(
   const context = latestContext(view.rows)
   const contextText = context === undefined ? undefined : contextLine(context, view.columns)
   const hasRequests = shown.some(row => row.requests !== undefined)
+  const missed = shown.filter(row => (row.cacheLost ?? 0) > 0)
   const legendText = legend.map(segment => `■ ${segment.label}  `).join('') + `list prices of ${view.pricesAsOf}`
   const linkIntro = view.columns >= 70 ? 'Every prompt, request, context and tool in detail: ' : 'Details: '
   const rowsBeside =
@@ -346,6 +350,7 @@ export function drawBand(
     (preloaded === undefined ? 0 : rowsFor(preloaded.length, view.columns)) +
     2 +
     (hasRequests ? 1 : 0) +
+    (missed.length > 0 ? 1 : 0) +
     (hasOver ? 1 : 0) +
     (contextText === undefined ? 0 : rowsFor(contextText.length, view.columns)) +
     rowsFor(legendText.length, view.columns) +
@@ -368,6 +373,15 @@ export function drawBand(
             ? ''
             : ` · context ${tokensShort(context.tokens)} (${percent(context.tokens, context.window)})`}
         </Text>
+        {missed.length === 0 ? null : (
+          <Text color={MISS_COLOR}>
+            {' · cache missed at '}
+            {missed
+              .slice(-3)
+              .map(row => `#${row.n}`)
+              .join(', ')}
+          </Text>
+        )}
         {cache === undefined ? null : (
           <Text dimColor={cache.color === undefined} color={cache.color}>
             {'  '}
@@ -425,6 +439,22 @@ export function drawBand(
         <Text dimColor mono wrap="truncate">
           {' '.repeat(AXIS) + shown.map(row => padded(requestLabel(row.requests))).join('')}
         </Text>
+      ) : null}
+      {missed.length > 0 ? (
+        <Box flexDirection="row">
+          <Text dimColor mono>
+            {'missed'.padStart(AXIS - 2) + '  '}
+          </Text>
+          {shown.map(row =>
+            row.cacheLost === undefined ? (
+              <Text mono>{' '.repeat(COLUMN)}</Text>
+            ) : (
+              <Text mono color={MISS_COLOR}>
+                {padded(`✗ ${tokensShort(row.cacheLost)}`)}
+              </Text>
+            ),
+          )}
+        </Box>
       ) : null}
       {hasOver ? (
         <Text dimColor mono wrap="truncate">

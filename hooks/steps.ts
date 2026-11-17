@@ -32,7 +32,12 @@ export type Step = {
   chars: CharCounts
   startedAt: number
   endedAt: number
-  /** No cache was read: the cache was cold or the prefix changed. */
+  /**
+   * Tokens the previous request had in the cache that this one did not
+   * read: the cache expired, the context was compacted, or its start changed.
+   */
+  cacheLost: number
+  /** A cache miss: at least MIN_CACHE_LOST tokens lost. */
   isCold: boolean
 }
 
@@ -59,6 +64,24 @@ export const noTokens = (): Tokens => ({
 /** All the input a request was answered over. */
 export const contextOf = (tokens: Tokens): number =>
   tokens.inputTokens + tokens.cacheReadTokens + tokens.cacheCreationTokens
+
+/** What a request leaves in the cache for the next one: what it read and wrote. */
+export const cachedAfter = (tokens: Tokens): number => tokens.cacheReadTokens + tokens.cacheCreationTokens
+
+/**
+ * The smallest loss counted as a miss: the cache stores at least 1,024
+ * tokens at a time, so a smaller drop is a breakpoint moving, not a miss.
+ */
+export const MIN_CACHE_LOST = 1_024
+
+/**
+ * What the previous request had cached that this one did not read. Claude
+ * Code's system prompt usually stays cached, so a miss reads that much and
+ * writes the rest again; reading nothing at all is not the test.
+ */
+export function cacheLostOf(previousCached: number | undefined, tokens: Tokens): number {
+  return previousCached === undefined ? 0 : Math.max(0, previousCached - tokens.cacheReadTokens)
+}
 
 /**
  * Prices one step: thinking tokens as the API reported them when the

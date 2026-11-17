@@ -4,6 +4,15 @@ All notable changes to this mod are listed here. The format follows [Keep a Chan
 
 ## [Unreleased]
 
+### Added
+
+- Cache misses are marked under the bars, in the band and in the viewer, with the tokens sent again; the viewer's tooltip says why (idle time or compaction). The viewer finds them in logs from earlier versions too.
+- Prompt rows: `cacheLostTokens`, the tokens the previous request had cached that missed requests sent again. Request rows get the same field.
+
+### Fixed
+
+- A cache miss was counted only when a request read nothing from the cache, which almost never happens because Claude Code's system prompt stays cached; `cacheMissRequests`, `recachedTokens`, `isCacheMiss` and a subagent's `coldRequests` were nearly always 0. A request now misses when it reads at least 1,024 tokens less than the request before it left cached.
+
 ### Changed
 
 - The band's button for the default view reads "new tokens" instead of "new".

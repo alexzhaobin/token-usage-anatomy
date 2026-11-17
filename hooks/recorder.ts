@@ -14,7 +14,7 @@ import type { Ports } from './ports'
 import { buildCompactRow, buildContextRow, buildPromptRow, buildRequestRows, labelOf, preloadedOf } from './rows'
 import type { Row } from './rows'
 import { FIVE_MINUTES, MAX_ROWS, ONE_HOUR, initialCache } from './state'
-import { contextOf, mergeTools, noTokens, priceStep, tokenParts, tokenTotal } from './steps'
+import { MIN_CACHE_LOST, cacheLostOf, cachedAfter, contextOf, mergeTools, noTokens, priceStep, tokenParts, tokenTotal } from './steps'
 import type { CharCounts, Step, ToolStat } from './steps'
 import { Agents, priceAgents, summarise } from './subagents'
 import { matchSteps } from './transcript'
@@ -189,6 +189,10 @@ export class Recorder {
   async step(e: TurnStepInput, result: TurnStepResult, chars: CharCounts, startedAt: number, endedAt: number) {
     const usage = result.usage
     const tokens = tokensOf(usage)
+    const agent = e.agentId === undefined ? undefined : this.agents.get(e.agentId)
+    const previousCached =
+      agent !== undefined ? agent.cachedTokens : this.context === undefined ? undefined : (await this.context.ports.state.cache.get()).cachedTokens
+    const cacheLost = usage === null ? 0 : cacheLostOf(previousCached, tokens)
     const step: Step = {
       index: e.index,
       model: usage?.model ?? e.model,
@@ -201,13 +205,23 @@ export class Recorder {
       chars,
       startedAt,
       endedAt,
-      isCold: usage !== null && tokens.cacheReadTokens === 0,
+      cacheLost,
+      isCold: cacheLost >= MIN_CACHE_LOST,
     }
 
-    if (e.agentId !== undefined) {
-      this.agents.get(e.agentId).steps.push(step)
+    if (agent !== undefined) {
+      agent.steps.push(step)
+
+      if (usage !== null) {
+        agent.cachedTokens = cachedAfter(tokens)
+      }
 
       return
+    }
+
+    if (usage !== null && this.context !== undefined) {
+      const cachedTokens = cachedAfter(tokens)
+      await this.context.ports.state.cache.set(cache => ({ ...cache, cachedTokens }))
     }
 
     const turn = this.turn?.turnId === e.turnId ? this.turn : undefined
@@ -388,6 +402,11 @@ export class Recorder {
       unattributedUsd: built.unattributedUsd,
       overUsd: built.overUsd,
       requests: priced.length,
+    }
+    const cacheLost = priced.reduce((sum, step) => sum + (step.isCold ? step.cacheLost : 0), 0)
+
+    if (cacheLost > 0) {
+      bar.cacheLost = cacheLost
     }
     // The status line's figure, else what the last request was sent.
     const lastStep = priced.at(-1)

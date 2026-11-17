@@ -41,6 +41,7 @@
     --c-hit: #2a78d6;
     --c-context: #2a78d6;
     --c-window: #d63c3c;
+    --c-miss: #d63c3c;
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
@@ -64,6 +65,7 @@
     --c-hit: #3987e5;
     --c-context: #3987e5;
     --c-window: #e0605a;
+    --c-miss: #e0605a;
   }
   @media (prefers-color-scheme: dark) {
     :root[data-theme="auto"] {
@@ -88,6 +90,7 @@
       --c-hit: #3987e5;
       --c-context: #3987e5;
       --c-window: #e0605a;
+      --c-miss: #e0605a;
     }
   }
 
@@ -154,6 +157,7 @@
   svg.chart .grid { stroke: var(--grid); stroke-width: 1; }
   svg.chart .axis { stroke: var(--border); stroke-width: 1; }
   svg.chart .active { fill: none; stroke: var(--fg); stroke-width: 1.5; }
+  svg.chart text.miss { fill: var(--c-miss); font-weight: 650; }
   .multiples { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
   .multiples > div { min-width: 0; }
 
@@ -476,6 +480,8 @@
       write1h: num(r.cacheWrite1hTokens),
       coldRequests: num(r.cacheMissRequests),
       recachedTokens: num(r.recachedTokens),
+      // The row's own miss counts, for rows with no request list.
+      rowMiss: { requests: num(r.cacheMissRequests), lost: num(r.cacheLostTokens), written: num(r.recachedTokens) },
       contextEnd: num(r.contextTokens),
       contextPeak: Math.max(num(r.peakContextTokens), maxOf(byStep)),
       contextByStep: byStep,
@@ -657,7 +663,61 @@
     const contexts = sessions.flatMap(s => s.contexts).sort(byTime)
     const compacts = sessions.flatMap(s => s.compacts).sort(byTime)
     const order = new Map(sessions.map((s, i) => [s, i + 1]))
+    for (const session of sessions) findMisses(session)
     return { isAll, sessions, prompts, contexts, compacts, order }
+  }
+
+  /** The cache stores at least this many tokens at a time; a smaller drop is no miss. */
+  const MIN_CACHE_LOST = 1024
+
+  /**
+   * Cache misses, request by request: a request that reads less than the one
+   * before it left in the cache (what it read and wrote) lost the rest. The
+   * system prompt usually stays cached, so a miss rarely reads nothing. Taken
+   * from each prompt's request list, so logs written before the mod counted
+   * misses this way are marked too; the row's own counts are the fallback.
+   */
+  function findMisses(session) {
+    // By time: a resumed session numbers its prompts from 1 again.
+    const prompts = [...session.prompts].sort((a, b) => num(a.at.getTime()) - num(b.at.getTime()))
+    let cached
+    let previousAt
+    for (const p of prompts) {
+      let requests = 0
+      let lost = 0
+      let written = 0
+      if (p.detail.length > 0) {
+        // Requests left out of the list break the chain.
+        if (p.detail[0].k > 1) cached = undefined
+        for (const d of p.detail) {
+          const read = num(d.cacheReadTokens)
+          const write = num(d.cacheCreationTokens)
+          const gone = cached === undefined ? 0 : Math.max(0, cached - read)
+          if (gone >= MIN_CACHE_LOST) {
+            requests += 1
+            lost += gone
+            written += write
+          }
+          cached = read + write
+        }
+      } else {
+        requests = p.rowMiss.requests
+        lost = p.rowMiss.lost
+        written = p.rowMiss.written
+        cached = undefined
+      }
+      const afterCompact = session.compacts.some(c => c.at <= p.at && (previousAt === undefined || c.at > previousAt))
+      p.miss = requests > 0 ? { requests, lost, written, afterCompact } : undefined
+      p.coldRequests = requests
+      p.recachedTokens = written
+      previousAt = p.at
+    }
+  }
+
+  /** A miss, in words: what was lost and why, as far as the log shows. */
+  function missText(p) {
+    const why = p.miss.afterCompact ? ' after compaction' : p.idleBeforeMs !== undefined && p.idleBeforeMs >= 60000 ? ` after ${fmtDuration(p.idleBeforeMs)} idle` : ''
+    return `${fmtTokens(p.miss.lost)} tokens sent again${why}` + (p.miss.requests > 1 ? ` (${p.miss.requests} requests)` : '')
   }
 
   const barName = (view, p) => (view.isAll ? `S${view.order.get(p.session)}·${p.n}` : `#${p.n}`)
@@ -802,8 +862,9 @@
     const read = sum(prompts, p => p.tokens.cacheRead)
     const peak = maxOf(prompts.map(p => p.contextPeak))
 
-    // A cold cache: requests that read none of it, after the session's first prompt.
-    const cold = prompts.filter(p => p.coldRequests > 0 && !(p.n === 1 && !view.isAll))
+    // A cold cache: requests that lost what the one before had cached. A
+    // compaction rewrites the context on purpose, so it is not counted here.
+    const cold = prompts.filter(p => p.miss && !p.miss.afterCompact)
     if (cold.length > 0) {
       const recached = sum(cold, p => p.recachedTokens)
       const recachedUsd = sum(cold, p => (p.tokens.cacheWrite > 0 ? p.values.usd.cacheWrite * Math.min(1, p.recachedTokens / p.tokens.cacheWrite) : 0))
@@ -970,18 +1031,20 @@
    */
   function columnChart(opts) {
     const { bars, keys, label, format } = opts
-    const height = opts.height || 240
+    // A strip under the columns marks each prompt whose cache missed.
+    const missRow = bars.some(bar => bar.miss) ? 16 : 0
+    const height = (opts.height || 240) + missRow
     const totals = bars.map(bar => keys.reduce((total, key) => total + num(bar.values[key]), 0))
     const max = opts.max || maxOf(totals) || 1
     const step = Math.max(opts.minStep || 14, Math.min(56, (opts.width - PAD.left - PAD.right) / Math.max(1, bars.length)))
     const width = Math.max(opts.width, PAD.left + PAD.right + step * bars.length)
-    const plot = height - PAD.top - PAD.bottom
+    const plot = height - PAD.top - PAD.bottom - missRow
     const barWidth = Math.max(3, step * 0.7)
     const xOf = i => PAD.left + step * i + step / 2
 
     const chart = svg('svg', { class: 'chart', width, height, viewBox: `0 0 ${width} ${height}`, role: 'group', 'aria-roledescription': 'chart', 'aria-label': label + '. Use the arrow keys to read each column.', tabindex: 0 })
     const grid = svg('g', { 'aria-hidden': 'true' })
-    gridLines(grid, max, height, width, format)
+    gridLines(grid, max, height - missRow, width, format)
     chart.append(grid)
 
     const columns = svg('g', { 'aria-hidden': 'true' })
@@ -995,10 +1058,12 @@
         y -= h2
         columns.append(svg('rect', { x: xOf(i) - barWidth / 2, y, width: barWidth, height: Math.max(0.5, h2), fill: opts.colorOf ? opts.colorOf(key, bar) : color(key) }))
       }
+      if (bar.miss) columns.append(svg('text', { class: 'miss', x: xOf(i), y: PAD.top + plot + 14, 'text-anchor': 'middle', text: '✗' }))
       // Every few columns, and the last where it has room beside the one before.
       const isLast = i === bars.length - 1
       if (i % labelEvery === 0 || (isLast && (i % labelEvery) * step >= 44)) columns.append(svg('text', { x: xOf(i), y: height - 6, 'text-anchor': 'middle', text: bar.name }))
     })
+    if (missRow) columns.append(svg('text', { class: 'miss', x: PAD.left - 6, y: PAD.top + plot + 14, 'text-anchor': 'end', text: 'missed' }))
     chart.append(columns)
 
     const marker = svg('rect', { class: 'active', x: 0, y: PAD.top, width: step, height: plot, visibility: 'hidden', rx: 3 })
@@ -1053,6 +1118,7 @@
       .reverse()
       .map(part => [part.label, unitIsUsd() ? fmtUsdExact(values[part.key]) : fmtInt(values[part.key])])
     rows.push(['Requests', fmtInt(p.requests)])
+    if (p.miss) rows.push(['Cache missed', missText(p)])
     if (p.contextAfter !== undefined || p.contextEnd) rows.push(['Context after', fmtTokens(p.contextAfter !== undefined ? p.contextAfter : p.contextEnd) + (p.contextWindow ? ` (${fmtPct(p.contextAfter !== undefined ? p.contextAfter : p.contextEnd, p.contextWindow)})` : '')])
     rows.push(['Time', fmtTime(p.at)])
     return rows
@@ -1072,6 +1138,7 @@
           bars: view.prompts.map(p => ({
             name: barName(view, p),
             values: valuesOf(p),
+            miss: Boolean(p.miss),
             head: `Prompt ${barName(view, p)}${p.label ? ' · ' + p.label : ''}: ${amount(barTotal(p))}`,
             rows: () => promptRows(p, valuesOf(p)),
           })),
@@ -1368,16 +1435,17 @@
       return {
         name: barName(view, p),
         values: { hit },
+        miss: Boolean(p.miss),
         head: `Prompt ${barName(view, p)}: ${fmtPct(p.tokens.cacheRead, input)} from the cache`,
         rows: () => [
           ['Cache read', fmtInt(p.tokens.cacheRead)],
           ['Written to the cache', fmtInt(p.tokens.cacheWrite)],
           ['Uncached input', fmtInt(p.tokens.input)],
-          ['Requests that read no cache', fmtInt(p.coldRequests)],
+          ...(p.miss ? [['Cache missed', missText(p)]] : []),
         ],
       }
     })
-    return card('chart-hit', 'Cache hit rate per prompt', 'The share of each prompt’s input read from the cache. A dip means the cache had gone cold and the context was written again.', columnChart({ label: 'Cache hit rate per prompt', width, height: 160, keys: ['hit'], max: 100, format: v => Math.round(v) + '%', colorOf: () => 'var(--c-hit)', bars }))
+    return card('chart-hit', 'Cache hit rate per prompt', 'The share of each prompt’s input read from the cache. A dip means the cache had gone cold and the context was written again; ✗ marks each prompt whose cache missed.', columnChart({ label: 'Cache hit rate per prompt', width, height: 160, keys: ['hit'], max: 100, format: v => Math.round(v) + '%', colorOf: () => 'var(--c-hit)', bars }))
   }
 
   // ---------------------------------------------------------------- tables

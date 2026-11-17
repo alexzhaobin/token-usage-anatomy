@@ -32,6 +32,8 @@ type World = {
   isBroken: boolean
   /** What the mod wrote to the debug log. */
   logs: string[]
+  /** Each model request's usage in turn; USAGE_A once they run out. */
+  usages: Array<typeof USAGE_A>
 }
 
 /**
@@ -41,7 +43,7 @@ type World = {
 const fileKey = (path: string): string => path.replace(/\\/g, '/').replace(/^[A-Za-z]:(?=\/)/, '')
 
 function standIn(on: On): World {
-  const world: World = { files: new Map(), engineUsd: 0, isBroken: false, logs: [] }
+  const world: World = { files: new Map(), engineUsd: 0, isBroken: false, logs: [], usages: [] }
   const fail = (path: string) => {
     throw new Error(`ENOENT: ${path}`)
   }
@@ -125,7 +127,7 @@ function standIn(on: On): World {
     yield { kind: 'thinking', index: 0, text: 'Let me look.', ref: 1 }
     yield { kind: 'text', index: 1, text: 'Here is why.', ref: 2 }
 
-    return { turnId: e.turnId, index: e.index, answer: 'Here is why.', toolUses: [], stopReason: 'end_turn', usage: USAGE_A }
+    return { turnId: e.turnId, index: e.index, answer: 'Here is why.', toolUses: [], stopReason: 'end_turn', usage: world.usages.shift() ?? USAGE_A }
   })
 
   return world
@@ -286,6 +288,46 @@ describe('options', () => {
     expect(row?.label).toBeUndefined()
     expect(row?.prompt).toBeUndefined()
     expect(world.files.get(`${DIR}/data/session-1.js`)?.includes('secret')).toBe(false)
+  })
+})
+
+describe('cache misses', () => {
+  test('a request that reads less than the one before cached is a miss', async ($, on) => {
+    const world = standIn(on)
+    const bars: Array<{ n: number; cacheLost?: number }> = []
+    on('state.set', ($, e, next) => {
+      if (e.plugin === 'token-usage-anatomy' && e.key === 'rows') {
+        // Shaped state: the bars sit under the shape's tag.
+        bars.splice(0, bars.length, ...(e.value as { value: typeof bars }).value)
+      }
+
+      return next(e)
+    })
+    // 1: 7,000 cached. 2: reads all of it and adds 500. 3: reads only the
+    // system prompt's 1,000 and writes the rest again, as after a long pause.
+    world.usages = [
+      USAGE_A,
+      { ...USAGE_A, cache_read_input_tokens: 7_000, cache_creation_input_tokens: 500 },
+      { ...USAGE_A, cache_read_input_tokens: 1_000, cache_creation_input_tokens: 6_800 },
+    ]
+
+    // No transcript: the hooks' usage is priced as is, with no wait for it.
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: false })
+
+    for (const turnId of ['t1', 't2', 't3']) {
+      await $.turn.start({ turnId, text: 'next' })
+      await drain($.turn.step({ turnId, index: 0, model: 'claude-opus-5-5', messageCount: 1 }))
+      await $.turn.complete({ turnId, reason: 'answer', answer: '', durationMs: 9, isAborted: false, usage: USAGE_A })
+    }
+
+    await until(() => promptRows(world).length === 3)
+
+    expect(promptRows(world).map(row => [row.cacheMissRequests, row.cacheLostTokens])).toEqual([
+      [0, 0],
+      [0, 0],
+      [1, 6_500],
+    ])
+    expect(bars.map(bar => bar.cacheLost)).toEqual([undefined, undefined, 6_500])
   })
 })
 

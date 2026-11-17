@@ -29,14 +29,14 @@ In the terminal and the desktop app, a band above the prompt box draws one bar p
 - **Cache read**: the context re-read from the prompt cache. Every model request re-sends the whole conversation, so a prompt with ten tool calls reads its context ten times. This is usually most of the count, at a tenth of the input price, so it has a view of its own.
 - **$**: the **API list-price equivalent**, what the tokens would cost at Anthropic's published API prices. Most people use Claude Code on a subscription and are not billed per token; the figure is for comparison.
 
-Under each bar is the number of model requests the prompt took. Below the chart are the context window as it stands now and what was loaded before you typed (system prompt, tools, memory, skills). The title line counts down until the prompt cache goes cold.
+Under each bar is the number of model requests the prompt took, and a red **✗** with the tokens sent again when the prompt cache missed: a request read less than the one before it had cached, after a pause, a compaction or a change at the start of the context. Below the chart are the context window as it stands now and what was loaded before you typed (system prompt, tools, memory, skills). The title line counts down until the prompt cache goes cold.
 
 ### The viewer page
 
 `viewer.html` sits in the log folder and opens in any browser, offline. It reads the whole history:
 
 - Totals, then **What stands out**: plain-language findings computed from your rows, such as a cold cache and what writing it again cost, one prompt doing most of the work, or tool results filling the context. A finding appears only when the rows support it.
-- New tokens per prompt, the running total, each type on its own scale, the context size at every model request, what fills the context window, tool results, subagents and the cache hit rate, in all three views.
+- New tokens per prompt, the running total, each type on its own scale, the context size at every model request, what fills the context window, tool results, subagents and the cache hit rate, in all three views. A red **✗** under a bar marks a cache miss; hover the bar for what it cost and why (the idle time, or a compaction). Misses are found from each prompt's request list, so logs from earlier versions are marked too.
 - Every prompt and every model request in tables, and notes on how each figure was measured or estimated.
 - Charts work from the keyboard (one Tab stop each, arrow keys between columns, Escape closes the tooltip) and follow your light or dark theme.
 

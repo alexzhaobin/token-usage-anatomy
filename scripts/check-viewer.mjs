@@ -33,6 +33,19 @@ const HOSTILE_TITLE = '</script><b id="injected-title">bold</b> title \u2028 end
 const HOSTILE_LABEL = '<img id="injected-label" src="x" onerror="window.injected=1">'
 const PEAK = 777_777
 
+/**
+ * Three requests whose cache reads pick up where the one before left off
+ * (read + write), prompt after prompt, so the cache never misses.
+ */
+function warm(n, flags = [[0, 0, 1], [0, 0, 1], [0, 0, 1]]) {
+  const base = 47_000 + (n - 1) * 10_000
+  return [
+    [10, 3_000, base, 500, 100, flags[0][2], 0, 0.05, 1, 4_000, 0, flags[0][0], flags[0][1]],
+    [10, 2_000, base + 3_000, 500, 150, flags[1][2], 0, 0.05, 1, 4_000, 0, flags[1][0], flags[1][1]],
+    [10, 5_000, base + 5_000, 500, 150, flags[2][2], 0, 0.05, 0, 4_000, 0, flags[2][0], flags[2][1]],
+  ]
+}
+
 function prompt(n, at, extra = {}) {
   return {
     kind: 'prompt',
@@ -68,11 +81,7 @@ function prompt(n, at, extra = {}) {
     usOnlyRequests: 0,
     requestFields: ['inputTokens', 'cacheCreationTokens', 'cacheReadTokens', 'outputTokens', 'reasoningTokens', 'isReasoningReported', 'cacheWrite5mTokens', 'costUsd', 'toolUses', 'durationMs', 'model', 'isFast', 'isUsOnly'],
     requestModels: ['claude-opus-5-5'],
-    requestDetail: [
-      [10, 3_000, 47_000, 500, 100, 1, 0, 0.05, 1, 4_000, 0, 0, 0],
-      [10, 3_000, 49_000, 500, 150, 1, 0, 0.05, 1, 4_000, 0, 0, 0],
-      [10, 3_000, 54_000, 500, 150, 1, 0, 0.05, 0, 4_000, 0, 0, 0],
-    ],
+    requestDetail: warm(n),
     pricesAsOf: PRICES.asOf,
     estCostUsd: 0.15,
     estCostParts: { input: 0.0002, cacheRead: 0.075, cacheWrite: 0.09, reasoning: 0.01, answer: 0.0275 },
@@ -103,11 +112,7 @@ const batch2 = jsonl([
   prompt(2, '2026-01-02T03:10:00.000Z', {
     fastRequests: 2,
     usOnlyRequests: 1,
-    requestDetail: [
-      [10, 3_000, 47_000, 500, 100, 1, 0, 0.05, 1, 4_000, 0, 1, 0],
-      [10, 3_000, 49_000, 500, 150, 1, 0, 0.05, 1, 4_000, 0, 1, 1],
-      [10, 3_000, 54_000, 500, 150, 0, 0, 0.05, 0, 4_000, 0, 0, 0],
-    ],
+    requestDetail: warm(2, [[1, 0, 1], [1, 1, 1], [0, 0, 0]]),
     subagents: {
       starts: 1, runs: 0, agentCount: 1, requests: 4,
       tokens: { input: 40, cacheRead: 60_000, cacheWrite: 20_000, reasoning: 2_000, answer: 3_000 },
@@ -121,6 +126,12 @@ const batch2 = jsonl([
 const segment2 = jsonl([
   prompt(3, '2026-01-02T03:30:00.000Z', {
     cacheMissRequests: 1, recachedTokens: 60_000, cacheCreationTokens: 60_000, idleBeforeMs: 4_000_000, unattributedUsd: 0.01,
+    // After a pause only 20k is still cached: the 47k before it is sent again.
+    requestDetail: [
+      [10, 60_000, 20_000, 500, 100, 1, 0, 0.05, 1, 4_000, 0, 0, 0],
+      [10, 2_000, 80_000, 500, 150, 1, 0, 0.05, 1, 4_000, 0, 0, 0],
+      [10, 1_000, 82_000, 500, 150, 1, 0, 0.05, 0, 4_000, 0, 0, 0],
+    ],
     subagents: {
       starts: 0, runs: 1, agentCount: 1, requests: 1,
       tokens: { input: 10, cacheRead: 0, cacheWrite: 0, reasoning: 100, answer: 200 },
@@ -131,7 +142,15 @@ const segment2 = jsonl([
   }),
   { kind: 'compact', at: '2026-01-02T03:31:00.000Z', trigger: 'auto', tokensBefore: 180_000, tokensAfter: 30_000 },
   { kind: 'context', at: '2026-01-02T03:31:01.000Z', promptNo: 3, model: 'claude-opus-5-5', totalTokens: 30_000, maxTokens: 0, preloadedTokens: 0, categories: [{ name: 'Messages', tokens: 30_000, kind: 'used' }] },
-  prompt(4, '2026-01-02T03:40:00.000Z', { requests: 200_000, contextByStep: huge, peakContextTokens: 0 }),
+  prompt(4, '2026-01-02T03:40:00.000Z', {
+    // Its last three requests, the first just after the compaction.
+    requestDetail: [
+      [10, 25_000, 5_000, 500, 100, 1, 0, 0.05, 1, 4_000, 0, 0, 0],
+      [10, 1_000, 30_000, 500, 150, 1, 0, 0.05, 1, 4_000, 0, 0, 0],
+      [10, 1_000, 31_000, 500, 150, 1, 0, 0.05, 0, 4_000, 0, 0, 0],
+    ],
+    requests: 200_000, contextByStep: huge, peakContextTokens: 0,
+  }),
   { schema: 'token-usage-anatomy/2', kind: 'prompt', at: '2026-01-02T03:50:00.000Z', promptNo: 5 },
   '{not json',
 ])
@@ -320,6 +339,17 @@ try {
 
   const insights = await cdp.eval(`document.getElementById('insights')?.innerText || ''`)
   check('insights: the cold cache, from the rows', /went cold 1 time \(prompt #3\)/.test(insights) && /after a pause longer than the cache lasts \(1 hour\)/.test(insights), insights)
+  // Misses come from the request lists: #3 read 20k of the 67k #2 left cached.
+  // #4's list starts mid-prompt, so it cannot be told and is not marked.
+  const marks = await cdp.eval(`(() => {
+    const chart = document.querySelector('#chart-prompts svg')
+    const x = el => Math.round(Number(el.getAttribute('x')))
+    const names = [...chart.querySelectorAll('text:not(.miss)')].filter(t => /^#\\d+$/.test(t.textContent))
+    const marked = [...chart.querySelectorAll('text.miss')].filter(t => t.textContent === '✗').map(t => names.find(n => x(n) === x(t))?.textContent)
+    return { marked, label: [...chart.querySelectorAll('text.miss')].some(t => t.textContent === 'missed') }
+  })()`)
+  check('a cache miss is marked under its bar, labelled', JSON.stringify(marks.marked) === '["#3"]' && marks.label, JSON.stringify(marks))
+  check('the cache hit chart marks the same prompt', (await cdp.eval(`document.querySelectorAll('#chart-hit text.miss').length`)) === 2)
   check('insights: what was preloaded', /Before the first prompt, 49k tokens \(4\.9% of the 1M window\)/.test(insights), insights)
 
   const notes = await cdp.eval(`document.getElementById('notes').innerText`)
@@ -347,6 +377,8 @@ try {
   await cdp.key('ArrowLeft', 'ArrowLeft', 37)
   const previous = await tipText()
   check('arrow keys move between columns, with a tooltip', last.startsWith('Prompt #4') && previous.startsWith('Prompt #3'), `${last} / ${previous}`)
+  const missTip = await cdp.eval(`document.getElementById('tip').innerText`)
+  check('the tooltip says what the miss lost and why', /Cache missed\s+47k tokens sent again after 1 h 6 min idle/.test(missTip), missTip)
   await cdp.key('Escape', 'Escape', 27)
   check('Escape closes the tooltip', (await tipText()) === '')
   await cdp.key('Tab', 'Tab', 9)

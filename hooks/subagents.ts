@@ -34,6 +34,8 @@ export type AgentStats = {
   runs: number
   isRunning: boolean
   tools: Record<string, ToolStat>
+  /** What its last request left in the cache, for the next one's miss test. */
+  cachedTokens?: number
   /** From the SubagentStop hook, when it has run. */
   transcriptPath?: string
   /** Where the next read of its transcript starts. */

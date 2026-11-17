@@ -136,8 +136,10 @@ export function buildPromptRow(input: PromptInput): PromptResult {
     totalInputTokens: inputAll,
     cacheMissTokens: tokens.input + tokens.cacheWrite,
     cacheHitPct: inputAll === 0 ? null : Math.round((tokens.cacheRead / inputAll) * 1000) / 10,
-    // The cache: requests that read none of it, and what they wrote again.
+    // The cache: requests that missed what the request before them had
+    // cached, what they lost, and what they wrote.
     cacheMissRequests: steps.filter(step => step.isCold).length,
+    cacheLostTokens: sum(step => (step.isCold ? step.cacheLost : 0)),
     recachedTokens: sum(step => (step.isCold ? step.tokens.cacheCreationTokens : 0)),
     idleBeforeMs: input.idleBeforeMs,
     // The context window, request by request.
@@ -211,6 +213,7 @@ export function buildRequestRows(
     reasoningMethod: step.reasoningMethod,
     contextTokens: contextOf(step.tokens),
     isCacheMiss: step.isCold,
+    cacheLostTokens: step.isCold ? step.cacheLost : 0,
     thinkingChars: step.chars.thinking,
     answerChars: step.chars.text,
     toolInputChars: step.chars.toolInput,

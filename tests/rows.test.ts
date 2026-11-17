@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { SessionUsage } from 'claude-code'
 
 import { buildPromptRow, labelOf, preloadedOf } from '../hooks/rows'
-import { priceStep } from '../hooks/steps'
+import { MIN_CACHE_LOST, cacheLostOf, priceStep } from '../hooks/steps'
 import type { Step } from '../hooks/steps'
 import { Agents, subagentPath, summarise } from '../hooks/subagents'
 
@@ -17,7 +17,8 @@ const step = (overrides: Partial<Step> = {}): Step => ({
   chars: { thinking: 0, text: 4_000, toolInput: 0 },
   startedAt: 0,
   endedAt: 500,
-  isCold: true,
+  cacheLost: 0,
+  isCold: false,
   ...overrides,
 })
 
@@ -41,7 +42,7 @@ describe('buildPromptRow', () => {
 
     expect(micro(built.unattributedUsd)).toBe(8_000)
     expect(built.overUsd).toBe(0)
-    expect(built.row).toMatchObject({ estCostUsd: 0.012, cacheHitPct: 0, cacheMissRequests: 1, requests: 1 })
+    expect(built.row).toMatchObject({ estCostUsd: 0.012, cacheHitPct: 0, cacheMissRequests: 0, requests: 1 })
   })
 
   test('pricing above the engine is "over", never hidden', () => {
@@ -74,11 +75,37 @@ describe('buildPromptRow', () => {
     expect(built.row.estCostUsd).toBe(0.012)
   })
 
+  test('a miss counts what the request before had cached', () => {
+    const missed = step({ cacheLost: 40_000, isCold: true, tokens: { inputTokens: 5, cacheReadTokens: 25_000, cacheCreationTokens: 41_000, outputTokens: 10 } })
+    const built = buildPromptRow({ ...base, steps: [priceStep(missed, undefined), priceStep(step(), undefined)], engine: {} })
+
+    expect(built.row).toMatchObject({ cacheMissRequests: 1, cacheLostTokens: 40_000, recachedTokens: 41_000 })
+  })
+
   test('no prompt text unless given', () => {
     const built = buildPromptRow({ ...base, steps: [], engine: {} })
 
     expect('label' in built.row).toBe(false)
     expect('prompt' in built.row).toBe(false)
+  })
+})
+
+describe('cacheLostOf', () => {
+  const tokens = (cacheReadTokens: number) => ({ inputTokens: 1, cacheReadTokens, cacheCreationTokens: 0, outputTokens: 1 })
+
+  test('what the previous request cached, less what this one read', () => {
+    // A cold cache after a pause: only the system prompt is read.
+    expect(cacheLostOf(300_000, tokens(25_000))).toBe(275_000)
+    // A warm one reads all of it and more.
+    expect(cacheLostOf(300_000, tokens(301_000))).toBe(0)
+  })
+
+  test('nothing to lose before the first request', () => {
+    expect(cacheLostOf(undefined, tokens(0))).toBe(0)
+  })
+
+  test('a miss is at least one cache block', () => {
+    expect(MIN_CACHE_LOST).toBe(1_024)
   })
 })
 

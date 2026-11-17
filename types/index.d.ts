@@ -48,6 +48,11 @@ export type CostRow = {
   requests?: number
   /** The context window once the prompt was answered, as the status line counts it. */
   context?: { tokens: number; window: number }
+  /**
+   * Cache misses in the prompt's own requests: tokens the previous request
+   * had cached that had to be sent again. Absent when the cache held.
+   */
+  cacheLost?: number
 }
 
 /** When the prompt cache goes cold, for the countdown. */
@@ -58,6 +63,8 @@ export type CacheClock = {
   ttlMs: number
   /** The last second the countdown was redrawn at. */
   now: number
+  /** What the last main-loop request left in the cache, to tell a miss in the next. */
+  cachedTokens?: number
 }
 
 /** One category of the context window filled before the first prompt. */
