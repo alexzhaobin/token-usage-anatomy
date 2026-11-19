@@ -200,7 +200,7 @@ export class Logbook {
   /** Writes a whole file unless it already holds exactly that text. */
   async writeIfChanged(path: string, text: string): Promise<void> {
     try {
-      if ((await this.ports.fs.read(path)) === text) {
+      if ((await this.ports.fs.readText(path)) === text) {
         return
       }
     } catch {
@@ -213,7 +213,7 @@ export class Logbook {
   /** Copies the viewer page beside the logs, unless the copy there is the same. */
   async installViewer(): Promise<void> {
     try {
-      const page = await this.ports.fs.read(`${this.host.pluginRoot}/assets/viewer.html`)
+      const page = await this.ports.fs.readText(`${this.host.pluginRoot}/assets/viewer.html`)
       await this.writeIfChanged(`${this.dir}/viewer.html`, page)
     } catch (error) {
       // The logs matter more than the page: log it and go on.
@@ -255,7 +255,7 @@ export class Logbook {
         continue
       }
 
-      const text = await this.ports.fs.read(`${this.dir}/${entry.name}`)
+      const text = await this.ports.fs.readText(`${this.dir}/${entry.name}`)
       await this.ports.fs.write(`${this.dir}/data/${copy}`, dataStatement(parsed.sessionId, text))
     }
 

@@ -113,7 +113,7 @@ export function fakeWorld(): FakeWorld {
     sleep: async () => {},
     debug: text => void world.logs.push(text),
     fs: {
-      read: async path => {
+      readText: async path => {
         const file = world.files.get(path)
 
         if (file === undefined) {
@@ -122,7 +122,7 @@ export function fakeWorld(): FakeWorld {
 
         return file.text
       },
-      readBase64: async path => base64Of(await world.ports.fs.read(path)),
+      readBase64: async path => base64Of(await world.ports.fs.readText(path)),
       write: async (path, text) => write(path, text),
       list,
       exists: async path => world.files.has(path) || [...world.files.keys()].some(p => p.startsWith(`${path}/`)),

@@ -153,7 +153,7 @@ export async function readTitle(ports: Ports, host: Host, path: string): Promise
 
   if (size <= FS_READ_LIMIT) {
     try {
-      return parseTitle(await ports.fs.read(path))
+      return parseTitle(await ports.fs.readText(path))
     } catch {
       // Grew past the limit: use the helper.
     }
@@ -184,6 +184,6 @@ export async function appendText(ports: Ports, host: Host, path: string, text: s
     // No process: rewrite with the file API below.
   }
 
-  const before = (await ports.fs.exists(path)) ? await ports.fs.read(path) : ''
+  const before = (await ports.fs.exists(path)) ? await ports.fs.readText(path) : ''
   await ports.fs.write(path, before + text)
 }

@@ -33,7 +33,7 @@ export type Ports = {
   /** A line in Claude Code's debug log. */
   debug: (text: string) => void
   fs: {
-    read: (path: string) => Promise<string>
+    readText: (path: string) => Promise<string>
     /** A file's bytes, base64-encoded. */
     readBase64: (path: string) => Promise<string>
     write: (path: string, text: string) => Promise<void>

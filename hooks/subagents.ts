@@ -143,7 +143,7 @@ async function describe(
   }
 
   try {
-    const meta = JSON.parse(await ports.fs.read(path.replace(/\.jsonl$/, '.meta.json'))) as Record<string, unknown>
+    const meta = JSON.parse(await ports.fs.readText(path.replace(/\.jsonl$/, '.meta.json'))) as Record<string, unknown>
 
     return {
       type: typeof meta.agentType === 'string' ? meta.agentType : undefined,

@@ -88,7 +88,7 @@ export const register: Register = (on, options) => {
         sleep: ms => $.clock.sleep(ms),
         debug: text => $.ui.log(text, { to: 'debug' }),
         fs: {
-          read: path => $.fs.read(path),
+          readText: path => $.fs.read(path),
           readBase64: async path => (await $.fs.read(path, { as: 'bytes' })).base64,
           write: (path, text) => $.fs.write(path, text),
           list: path => $.fs.list(path),
