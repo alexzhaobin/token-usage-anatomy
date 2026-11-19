@@ -4,6 +4,29 @@ A Claude Code mod that shows how every prompt turns into input, output, cache-re
 
 **No network, no telemetry.** The mod never sends anything anywhere. Everything it records stays in a folder on your machine, and the viewer page works offline from disk.
 
+![The chart above the prompt: one bar per prompt, split into cache writes, input, thinking, answer and subagents, with the requests each prompt took and the cache misses marked in red](assets/screenshots/band-new-tokens.png)
+
+<sub>Screenshots are from a real session; its prompts are replaced with sample text.</sub>
+
+## Why a per-prompt anatomy
+
+Most usage tools give you a total: per day, per session, or a running count in the status line. A total tells you that tokens were spent, not which prompt spent them or why, so it does not change what you type next. This mod takes every prompt apart into what decides its size, and shows it right above the box where you type the next one.
+
+| A total shows | This mod shows | So you can |
+| --- | --- | --- |
+| One number per day or session | One bar per prompt, labelled with its first words | See which kinds of request are expensive and phrase them differently next time |
+| Input and output, added up | New tokens and cache reads apart, each in its own view | Tell a big prompt from a big context. In the session above, 11 prompts added 2.2M new tokens but re-read 38.3M from the cache: the total is mostly the context, re-sent |
+| Nothing about requests | The model requests each prompt took | Spot the multiplier. "Implement it across all routes" took 55 requests and re-read its context each time: 14M cache reads. Fewer tool round trips and narrower tool output shrink it |
+| Nothing about the cache | A red ✗ with the tokens sent again on each miss, and a countdown until the cache goes cold | Reply while the cache is warm, or start fresh instead of paying to write a large context again after a long break |
+| A context percentage | What was loaded before you typed (tools, skills, MCP servers, memory) and what fills the window | Turn off the MCP servers and skills you do not use: every request re-sends them |
+| Subagents mixed in, or missing | Subagents as their own part, with their own context | See whether handing work to a subagent kept your context small or just cost more |
+
+**It costs no tokens to run.** The mod reads Claude Code's own transcript after each prompt. Its hooks only watch: nothing is added to the conversation, unlike analysis hooks that inject summaries or reminders, which are re-sent with every later request.
+
+**Better results, not only fewer tokens.** A context full of stale tool output is slower, more expensive and gives the model more to sift through, and when it fills up, compaction drops detail. Seeing the context grow, and what fills it, tells you when to `/compact`, `/clear` or start a new session before the answers suffer.
+
+**Numbers you can check.** Each request is priced on its own and the total is compared with Claude Code's own cost count; any gap is shown, not hidden (see [How the numbers are made](#how-the-numbers-are-made)).
+
 ## Install
 
 ```sh
@@ -31,9 +54,13 @@ In the terminal and the desktop app, a band above the prompt box draws one bar p
 
 Under each bar is the number of model requests the prompt took, and a red **✗** with the tokens sent again when the prompt cache missed: a request read less than the one before it had cached, after a pause, a compaction or a change at the start of the context. Below the chart are the context window as it stands now and what was loaded before you typed (system prompt, tools, memory, skills). The title line counts down until the prompt cache goes cold.
 
+![The same prompts in the cache read view: the context re-read from the prompt cache, 14M tokens for the prompt that took 55 requests](assets/screenshots/band-cache-read.png)
+
 ### The viewer page
 
 `viewer.html` sits in the log folder and opens in any browser, offline. It reads the whole history:
+
+![The viewer page: totals, plain-language findings and new tokens per prompt with cache misses marked](assets/screenshots/viewer-overview.png)
 
 - Totals, then **What stands out**: plain-language findings computed from your rows, such as a cold cache and what writing it again cost, one prompt doing most of the work, or tool results filling the context. A finding appears only when the rows support it.
 - New tokens per prompt, the running total, each type on its own scale, the context size at every model request, what fills the context window, tool results, subagents and the cache hit rate, in all three views. A red **✗** under a bar marks a cache miss; hover the bar for what it cost and why (the idle time, or a compaction). Misses are found from each prompt's request list, so logs from earlier versions are marked too.
@@ -41,6 +68,8 @@ Under each bar is the number of model requests the prompt took, and a red **✗*
 - Charts work from the keyboard (one Tab stop each, arrow keys between columns, Escape closes the tooltip) and follow your light or dark theme.
 
 You can also open or drop `.jsonl` logs on the page, from another machine for example.
+
+![The context size at every model request, dropping at a compaction, and what fills the context window](assets/screenshots/viewer-context.png)
 
 ### `/token-anatomy`
 
