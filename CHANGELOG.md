@@ -4,6 +4,8 @@ All notable changes to this mod are listed here. The format follows [Keep a Chan
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-21
+
 ### Added
 
 - Cache misses are marked under the bars, in the band and in the viewer, with the tokens sent again; the viewer's tooltip says why (idle time or compaction). The viewer finds them in logs from earlier versions too.
@@ -34,5 +36,6 @@ The first release.
 - macOS, Linux and Windows support: transcripts past 4 MiB and log appends go through `scripts/io.sh` or `scripts/io.ps1`.
 - CI on Ubuntu, macOS and Windows: strict validation, unit tests, the plugin directory's file rules, both transcript readers, and the viewer in headless Chrome.
 
-[Unreleased]: https://github.com/alexzhaobin/token-usage-anatomy/compare/token-usage-anatomy--v0.1.0...HEAD
+[Unreleased]: https://github.com/alexzhaobin/token-usage-anatomy/compare/token-usage-anatomy--v0.2.0...HEAD
+[0.2.0]: https://github.com/alexzhaobin/token-usage-anatomy/compare/token-usage-anatomy--v0.1.0...token-usage-anatomy--v0.2.0
 [0.1.0]: https://github.com/alexzhaobin/token-usage-anatomy/releases/tag/token-usage-anatomy--v0.1.0

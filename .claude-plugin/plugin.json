@@ -1,7 +1,7 @@
 {
   "name": "token-usage-anatomy",
   "displayName": "Token Usage Anatomy",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Token Usage Anatomy for Claude Code: see how every prompt turns into input, output, cache reads and cache writes",
   "author": { "name": "Alex Zhao" },
   "license": "MIT",
